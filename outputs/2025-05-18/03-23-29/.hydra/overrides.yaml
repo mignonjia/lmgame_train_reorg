@@ -1,0 +1,13 @@
+- system.CUDA_VISIBLE_DEVICES=1
+- trainer.n_gpus_per_node=1
+- model_path=Qwen/Qwen2.5-0.5B-Instruct
+- trainer.resume_mode=disable
+- trainer.val_only=False
+- trainer.total_training_steps=200
+- trainer.save_freq=100
+- es_manager.train.env_configs.tags=[SimpleSokoban]
+- agent_proxy.enable_think=True
+- trainer.project_name=train_with_think
+- es_manager.val.env_groups=256
+- es_manager.val.env_configs.tags=[SimpleSokoban]
+- es_manager.val.env_configs.n_groups=[256]
