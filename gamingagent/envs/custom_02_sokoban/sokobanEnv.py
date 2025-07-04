@@ -17,32 +17,16 @@ from gymnasium.core import RenderFrame
 # For this refactor, we will redefine it here, taking inspiration from sokoban_env.py.
 
 # --- Constants and Asset Paths (from sokoban_env.py) ---
-ACTION_LOOKUP = { # Simplified, adapter will handle mapping from string like "up"
+# Updated lookup: 0-4 (no-op + four directions). A single directional action will move
+# the player; if a box is in the chosen direction and the square beyond is free, the
+# box will be pushed automatically.
+ACTION_LOOKUP = {
     0: 'no operation',
-    1: 'push up',
-    2: 'push down',
-    3: 'push left',
-    4: 'push right',
-    5: 'move up',
-    6: 'move down',
-    7: 'move left',
-    8: 'move right',
+    1: 'up',
+    2: 'down',
+    3: 'left',
+    4: 'right',
 }
-
-# Raw actions for the environment itself (0-3 for up, down, left, right)
-# These are the actions the _push and _move would expect if we simplify.
-# The GymEnvAdapter will map agent string actions ("up", "right", "push up") to these.
-# Let's define the core env actions based on sokoban_env_old.py for _move and _push.
-# For internal logic, we can map:
-# - 0: Up (for move/push)
-# - 1: Down (for move/push)
-# - 2: Left (for move/push)
-# - 3: Right (for move/push)
-# The adapter's action_mapping in game_env_config.json will map strings like "move up" to 5, "push up" to 1, etc.
-# And then the SokobanEnv can internally map these to the 0-3 directional indices.
-# For simplicity in this refactor, let's assume the direct action indices for _push and _move
-# will be 0:up, 1:down, 2:left, 3:right.
-# The ACTION_LOOKUP above is more for info. The real mapping will be in game_env_config.json
 
 CHANGE_COORDINATES = { # (row_change, col_change)
     0: (-1, 0),  # Up
@@ -160,6 +144,7 @@ def create_board_image_sokoban(board_state: np.ndarray, save_path: str, tile_siz
         if save_dir: os.makedirs(save_dir, exist_ok=True)
         img.save(save_path)
 
+# ------------------------- Sokoban 1989 Evaluation Environment -------------------------
 
 class SokobanEnv(gym.Env):
     metadata = {'render_modes': ['human', 'rgb_array', 'raw'], 'render_fps': 4}
@@ -200,7 +185,7 @@ class SokobanEnv(gym.Env):
         self.reward_box_on_target = 1.0
         self.reward_finished = 10.0
         
-        self.action_space = Discrete(9) # 0: no_op, 1-4: push, 5-8: move (corresponds to ACTION_LOOKUP length)
+        self.action_space = Discrete(5) # 0: no_op, 1-4: directional moves (push happens automatically if possible)
         # Observation space will be dynamically set in reset based on room_fixed and tile_size
         # For now, set a placeholder. The adapter gets Observation objects.
         # The gym observation space for this env will be the raw board state (numerical)
@@ -454,61 +439,70 @@ class SokobanEnv(gym.Env):
         
         return float(reward)
 
-    def _internal_push_or_move(self, action_mapped_idx: int) -> Tuple[bool, bool]:
-        # action_mapped_idx: 0-no_op, 1-push_up, ..., 8-move_right
-        # We need to map this to simple directions 0-up, 1-down, 2-left, 3-right
-        # and determine if it's a push or move.
-        
+    def _internal_push_or_move(self, action_idx: int) -> Tuple[bool, bool]:
+        """Execute a move or push depending on what is in the chosen direction.
+
+        The action space is:
+            0: no operation
+            1: up
+            2: down
+            3: left
+            4: right
+
+        When a directional action (1-4) is selected, the environment first checks
+        the square adjacent to the player in that direction:
+            • If it contains a box (3 or 4) **and** the square beyond it is free
+              (1 or 2), the box is pushed and the player follows it.
+            • Else, if the adjacent square is free (1 or 2), the player simply
+              moves there.
+            • Otherwise, the action has no effect.
+        """
+
         moved_player, moved_box = False, False
-        if action_mapped_idx == 0: return False, False # no_op
 
-        is_push_action = 1 <= action_mapped_idx <= 4
-        is_move_action = 5 <= action_mapped_idx <= 8
-        
-        direction_idx = -1
-        if is_push_action: direction_idx = action_mapped_idx - 1 # 1-4 -> 0-3
-        elif is_move_action: direction_idx = action_mapped_idx - 5 # 5-8 -> 0-3
-        else: return False, False # Should not happen if action mapping is correct
+        # No-op
+        if action_idx == 0:
+            return moved_player, moved_box
 
+        # Map 1-4 → 0-3 (up, down, left, right)
+        direction_idx = action_idx - 1
         change = CHANGE_COORDINATES[direction_idx]
+
         player_r, player_c = self.player_position
-        next_player_r, next_player_c = player_r + change[0], player_c + change[1]
+        next_r, next_c = player_r + change[0], player_c + change[1]
 
-        # Boundary checks for next_player_pos
-        if not (0 <= next_player_r < self.dim_room[0] and 0 <= next_player_c < self.dim_room[1]):
-            return False, False # Player would move out of bounds
+        # Boundary check for the player's destination
+        if not (0 <= next_r < self.dim_room[0] and 0 <= next_c < self.dim_room[1]):
+            return moved_player, moved_box
 
-        if is_push_action:
-            box_target_r, box_target_c = next_player_r + change[0], next_player_c + change[1]
-            # Boundary checks for box_target_pos
-            if not (0 <= box_target_r < self.dim_room[0] and 0 <= box_target_c < self.dim_room[1]):
-                return False, False # Box would be pushed out of bounds
+        next_tile = self.room_state[next_r, next_c]
 
-            is_box_at_next = self.room_state[next_player_r, next_player_c] in [3, 4] # Box or BoxOnTarget
-            can_box_move_to_target = self.room_state[box_target_r, box_target_c] in [1, 2] # Floor or Target
+        # Case 1: The adjacent square contains a box → try to push
+        if next_tile in [3, 4]:
+            box_dest_r, box_dest_c = next_r + change[0], next_c + change[1]
 
-            if is_box_at_next and can_box_move_to_target:
-                # Move Box
-                self.room_state[box_target_r, box_target_c] = 3 if self.room_fixed[box_target_r, box_target_c] == 2 else 4
+            # Boundary check for the box destination
+            if not (0 <= box_dest_r < self.dim_room[0] and 0 <= box_dest_c < self.dim_room[1]):
+                return moved_player, moved_box  # Can't push out of bounds
+
+            if self.room_state[box_dest_r, box_dest_c] in [1, 2]:  # Floor or Target
+                # Move the box
+                self.room_state[box_dest_r, box_dest_c] = 3 if self.room_fixed[box_dest_r, box_dest_c] == 2 else 4
                 moved_box = True
-                # Move Player (follows box)
-                self.room_state[next_player_r, next_player_c] = 6 if self.room_fixed[next_player_r, next_player_c] == 2 else 5
-                self.room_state[player_r, player_c] = self.room_fixed[player_r, player_c] # Restore original player tile
-                self.player_position = np.array([next_player_r, next_player_c])
+
+                # Move the player into the box's previous square
+                self.room_state[next_r, next_c] = 6 if self.room_fixed[next_r, next_c] == 2 else 5
+                self.room_state[player_r, player_c] = self.room_fixed[player_r, player_c]
+                self.player_position = np.array([next_r, next_c])
                 moved_player = True
-            # else: # Cannot push, try to move if agent intended push but couldn't
-            # This behavior (falling back to move if push fails) can be complex.
-            # Let's make it explicit: if a push action is chosen, it either pushes or does nothing.
-            # If agent wants to "try push then move", it should send a "move" action if push is known to fail.
-            # For now, a failed push is just a failed push.
-            
-        elif is_move_action:
-            if self.room_state[next_player_r, next_player_c] in [1, 2]: # Floor or Target
-                self.room_state[next_player_r, next_player_c] = 6 if self.room_fixed[next_player_r, next_player_c] == 2 else 5
-                self.room_state[player_r, player_c] = self.room_fixed[player_r, player_c] # Restore original player tile
-                self.player_position = np.array([next_player_r, next_player_c])
-                moved_player = True
-        
+
+        # Case 2: The adjacent square is empty → simple move
+        elif next_tile in [1, 2]:
+            self.room_state[next_r, next_c] = 6 if self.room_fixed[next_r, next_c] == 2 else 5
+            self.room_state[player_r, player_c] = self.room_fixed[player_r, player_c]
+            self.player_position = np.array([next_r, next_c])
+            moved_player = True
+
         return moved_player, moved_box
 
     def matrix_to_text_table(self, matrix: List[List[str]]) -> str:
@@ -555,7 +549,7 @@ class SokobanEnv(gym.Env):
         truncated = False
         
         if env_action_idx is not None and self.action_space.contains(env_action_idx):
-            self._internal_push_or_move(env_action_idx)
+            moved_player, moved_box = self._internal_push_or_move(env_action_idx)
             reward = self._calc_reward()
             terminated = self._check_if_all_boxes_on_target()
             
@@ -717,3 +711,7 @@ class SokobanEnv(gym.Env):
         self.previous_boxes_on_target_for_perf = current_boxes_on_target
         
         return self.current_episode_cumulative_perf_score
+
+
+
+# ------------------------- Sokoban 1989 Training Environment -------------------------

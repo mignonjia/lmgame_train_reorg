@@ -8,14 +8,10 @@
     "level_to_load": 1,
     "action_mapping": {
         "no_op": 0,
-        "push up": 1,
-        "push down": 2,
-        "push left": 3,
-        "push right": 4,
-        "up": 5,
-        "down": 6,
-        "left": 7,
-        "right": 8
+        "up": 1,
+        "down": 2,
+        "left": 3,
+        "right": 4
     },
     "render_mode": "human", 
     "tile_size_for_render": 32,
