@@ -97,8 +97,8 @@ custom_envs:
   Tetris_1:
     env_type: tetris
     max_actions_per_traj: 40
-    max_turn: 10
-    env_instruction: "You are solving a simplified version of Tetris puzzle. The game board is a 4*4 grid, and blocks fall one at a time from the top. There is only one type of block, that is 1×1 square marked in X. Your goal is to fill the last row completely with blocks to get points, with the state such as \n____\n____\n____\n____\nYou can only move the current block left, right, or down. The answer should be a sequence of actions, like <answer>Left || Right || Down</answer> Hint: If we see empty space (_) in the last row, try to left/right move the current block to let it drop down to the empty space."
+    max_turn: 20
+    env_instruction: "You are solving a simplified version of Tetris puzzle. The game board is a 4*4 grid, and blocks fall one at a time from the top. There is only one type of block, that is 1×1 square marked in X. Your goal is to fill the last row completely with blocks to get points, with the state such as \n____\n____\n____\n####\nYou can only move the current block left, right, or down. The answer should be a sequence of actions, like <answer>Left || Right || Down</answer> Hint: If we see empty space (_) in the last row, try to left/right move the current block to let it drop down to the empty space."
     max_tokens: 100
     env_config:
       dim_x: 4
@@ -108,10 +108,9 @@ custom_envs:
 
   Tetris_2:
     env_type: tetris
-    max_actions_per_traj: 20
-    max_turn: 10
+    max_actions_per_traj: 40
+    max_turn: 20
     env_instruction: "You are solving a simplified version of Tetris puzzle. The game board is a 4*4 grid, and blocks fall one at a time from the top. Your goal is to fill the last row completely with blocks to get points, with the state such as \n____\n____\n____\n####\n. You can only move the current block left, right, or down. The answer should be a sequence of actions, like <answer>Left || Right || Down</answer> Hint: If we see empty space (_) in the last row, try to left/right move the current block to let it drop down to the empty space."
-    # "You are solving a simplified version of Tetris puzzle. The game board is a 4*4 grid, and blocks fall one at a time from the top. There is only one type of block, that is 1×1 square marked in X. Your goal is to fill the last row completely with blocks to get points, with the state such as \n____\n____\n____\n____\nYou can only move the current block left, right, or down. The answer should be a sequence of actions, like <answer>Left || Right || Down</answer> Hint: If we see empty space (_) in the last row, try to left/right move the current block to let it drop down to the empty space."
     max_tokens: 100
     env_config:
       dim_x: 4

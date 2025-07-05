@@ -9,8 +9,7 @@ import hydra
 import os
 from typing import List, Dict
 from verl.protocol import pad_dataproto_to_divisor, unpad_dataproto
-from ragen.llm_agent.base_llm import ConcurrentLLM
-from ragen.llm_agent.agent_proxy import ApiCallingWrapperWg, VllmWrapperWg, LLMAgentProxy
+from ragen.llm_agent.agent_proxy import VllmWrapperWg, LLMAgentProxy
 
 @hydra.main(version_base=None, config_path="../config", config_name="base")
 def main(config):

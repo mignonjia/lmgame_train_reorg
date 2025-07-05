@@ -33,7 +33,8 @@ import time
 
 WorkerType = Type[Worker]
 
-from verl.trainer.ppo.ray_trainer import Role, AdvantageEstimator, ResourcePoolManager, compute_advantage, compute_response_mask, _timer
+from verl.trainer.ppo.ray_trainer import Role, AdvantageEstimator, ResourcePoolManager, compute_advantage, compute_response_mask
+from verl.utils.debug import marked_timer
 from verl.trainer.ppo.ray_trainer import RayPPOTrainer as VerlRayPPOTrainer
 
 import torch
@@ -90,12 +91,12 @@ class RayAgentTrainer(VerlRayPPOTrainer):
                  reward_fn=None,
                  val_reward_fn=None):
 
-        super().__init__(config, tokenizer, role_worker_mapping, resource_pool_manager, ray_worker_group_cls, processor, reward_fn, val_reward_fn)
+        super().__init__(config, tokenizer, role_worker_mapping, resource_pool_manager, ray_worker_group_cls, processor=processor, reward_fn=reward_fn, val_reward_fn=val_reward_fn)
         # do not use the original val logger, but use this here
         self.generations_logger = GenerationsLogger()
         
         
-    def _create_dataloader(self):
+    def _create_dataloader(self, train_dataset, val_dataset, collate_fn, train_sampler):
         assert self.config.trainer.total_training_steps is not None, "must determine total training steps"
         total_training_steps = self.config.trainer.total_training_steps
 
@@ -308,9 +309,9 @@ class RayAgentTrainer(VerlRayPPOTrainer):
             # print("[DEBUG] batch: ", batch)
             is_last_step = self.global_steps >= self.total_training_steps
 
-            with _timer('step', timing_raw):
+            with marked_timer('step', timing_raw):
                 # generate a batch
-                with _timer('gen', timing_raw):
+                with marked_timer('gen', timing_raw):
                     batch = self.agent_proxy.rollout(batch, val=False)
                     # print("batch: ", batch)
                     batch, metrics = _filter_rollout(batch)
@@ -327,7 +328,7 @@ class RayAgentTrainer(VerlRayPPOTrainer):
                     # TODO: check if this is correct. Not tested yer
                     logger.log("[NotImplemented] REMAX implementation is not tested yet in RAGEN. Exiting.")
                     exit()
-                    with _timer('gen_max', timing_raw):
+                    with marked_timer('gen_max', timing_raw):
                         gen_baseline_batch = deepcopy(batch)
                         gen_baseline_batch.meta_info['do_sample'] = False
                         gen_baseline_output = self.agent_proxy.rollout(gen_baseline_batch, val=False)
@@ -365,7 +366,7 @@ class RayAgentTrainer(VerlRayPPOTrainer):
                 batch.meta_info['global_token_num'] = torch.sum(batch.batch['attention_mask'], dim=-1).tolist()
 
                 # recompute old_log_probs
-                with _timer('old_log_prob', timing_raw):
+                with marked_timer('old_log_prob', timing_raw):
                     old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
                     batch = batch.union(old_log_prob)
                     avg_old_log_prob = masked_mean(old_log_prob.batch['old_log_probs'], batch.batch['response_mask'])
@@ -373,7 +374,7 @@ class RayAgentTrainer(VerlRayPPOTrainer):
 
                 if self.use_reference_policy:
                     # compute reference log_prob
-                    with _timer('ref', timing_raw):
+                    with marked_timer('ref', timing_raw):
                         ref_log_prob = self.ref_policy_wg.compute_ref_log_prob(batch)
                         batch = batch.union(ref_log_prob)
                         avg_ref_log_prob = masked_mean(ref_log_prob.batch['ref_log_prob'], batch.batch['response_mask'])
@@ -381,11 +382,11 @@ class RayAgentTrainer(VerlRayPPOTrainer):
 
                 # compute values
                 if self.use_critic:
-                    with _timer('values', timing_raw):
+                    with marked_timer('values', timing_raw):
                         values = self.critic_wg.compute_values(batch)
                         batch = batch.union(values)
 
-                with _timer('adv', timing_raw):
+                with marked_timer('adv', timing_raw):
                     # compute scores. Support both model and function-based.
                     # We first compute the scores using reward model. Then, we call reward_fn to combine
                     # the results from reward model and rule-based results.
@@ -398,25 +399,46 @@ class RayAgentTrainer(VerlRayPPOTrainer):
                     reward_tensor = self.reward_fn(batch)
                     batch.batch['token_level_scores'] = reward_tensor
 
+                    # # compute rewards. apply_kl_penalty if available
+                    # if not self.config.actor_rollout_ref.actor.get('use_kl_loss', False):
+                    #     batch, kl_metrics = apply_kl_penalty(batch,
+                    #                                             kl_ctrl=self.kl_ctrl,
+                    #                                             kl_penalty=self.config.algorithm.kl_penalty)
+                    #     metrics.update(kl_metrics)
+                    # else:
+                    #     batch.batch['token_level_rewards'] = batch.batch['token_level_scores']
+
                     # compute rewards. apply_kl_penalty if available
-                    if not self.config.actor_rollout_ref.actor.get('use_kl_loss', False):
-                        batch, kl_metrics = apply_kl_penalty(batch,
-                                                                kl_ctrl=self.kl_ctrl,
-                                                                kl_penalty=self.config.algorithm.kl_penalty)
+                    if self.config.algorithm.use_kl_in_reward:
+                        batch, kl_metrics = apply_kl_penalty(batch, kl_ctrl=self.kl_ctrl_in_reward, kl_penalty=self.config.algorithm.kl_penalty)
                         metrics.update(kl_metrics)
                     else:
-                        batch.batch['token_level_rewards'] = batch.batch['token_level_scores']
+                        batch.batch["token_level_rewards"] = batch.batch["token_level_scores"]
 
                     # compute advantages, executed on the driver process
-                    batch = compute_advantage(batch,
-                                                adv_estimator=self.config.algorithm.adv_estimator,
-                                                gamma=self.config.algorithm.gamma,
-                                                lam=self.config.algorithm.lam,
-                                                num_repeat=self.config.actor_rollout_ref.rollout.n)
+                    
+                    # batch = compute_advantage(batch,
+                    #                             adv_estimator=self.config.algorithm.adv_estimator,
+                    #                             gamma=self.config.algorithm.gamma,
+                    #                             lam=self.config.algorithm.lam,
+                    #                             num_repeat=self.config.actor_rollout_ref.rollout.n)
+                    
+                    norm_adv_by_std_in_grpo = self.config.algorithm.get("norm_adv_by_std_in_grpo", True)  # GRPO adv normalization factor
+
+                    batch = compute_advantage(
+                        batch,
+                        adv_estimator=self.config.algorithm.adv_estimator,
+                        gamma=self.config.algorithm.gamma,
+                        lam=self.config.algorithm.lam,
+                        num_repeat=self.config.actor_rollout_ref.rollout.n,
+                        norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
+                        multi_turn=self.config.actor_rollout_ref.rollout.multi_turn.enable,
+                        config=self.config.algorithm,
+                    )
 
                 # update critic
                 if self.use_critic:
-                    with _timer('update_critic', timing_raw):
+                    with marked_timer('update_critic', timing_raw):
                         critic_output = self.critic_wg.update_critic(batch)
                     critic_output_metrics = reduce_metrics(critic_output.meta_info['metrics'])
                     metrics.update(critic_output_metrics)
@@ -424,7 +446,7 @@ class RayAgentTrainer(VerlRayPPOTrainer):
                 # implement critic warmup
                 if self.config.trainer.critic_warmup <= self.global_steps:
                     # update actor
-                    with _timer('update_actor', timing_raw):
+                    with marked_timer('update_actor', timing_raw):
                         actor_output = self.actor_rollout_wg.update_actor(batch)
                     actor_output_metrics = reduce_metrics(actor_output.meta_info['metrics'])
                     metrics.update(actor_output_metrics)
@@ -432,7 +454,7 @@ class RayAgentTrainer(VerlRayPPOTrainer):
                 # validate
                 if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and \
                     (is_last_step or  self.global_steps % self.config.trainer.test_freq == 0):
-                    with _timer('testing', timing_raw):
+                    with marked_timer('testing', timing_raw):
                         val_metrics: dict = self._validate()
                         if is_last_step:
                             last_val_metrics = val_metrics
@@ -440,7 +462,7 @@ class RayAgentTrainer(VerlRayPPOTrainer):
 
                 if self.config.trainer.save_freq > 0 and ( is_last_step or \
                         self.global_steps % self.config.trainer.save_freq == 0):
-                    with _timer('save_checkpoint', timing_raw):
+                    with marked_timer('save_checkpoint', timing_raw):
                         self._save_checkpoint()
 
             # collect metrics

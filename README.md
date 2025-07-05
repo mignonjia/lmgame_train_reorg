@@ -1,3 +1,9 @@
+/lustre/scratch/users/hao.zhang/dacheng/anaconda3/envs/ragen/lib/python3.9/site-packages/verl/workers/actor/dp_actor.py
+line 316-317
+from typing import Tuple, List, Optional
+def _get_micro_batches(data: DataProto) -> Tuple[List, Optional[List]]:
+need to upgrade to 3.10
+
 ## Environment Setup
 We recommend using Conda to manage dependencies. To create the `lmgame` environment and install all required packages, including `verl` and `vllm`, run:
 ```bash

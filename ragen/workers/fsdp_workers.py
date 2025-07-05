@@ -309,7 +309,7 @@ class ActorRolloutRefWorker(Worker):
 
         elif rollout_name == 'vllm':
             from verl.workers.rollout.vllm_rollout import vLLMRollout, vllm_mode
-            from verl.workers.sharding_manager import FSDPVLLMShardingManager
+            from verl.workers.sharding_manager.fsdp_vllm import FSDPVLLMShardingManager
             log_gpu_memory_usage(f'Before building {rollout_name} rollout', logger=None)
             local_path = copy_to_local(self.config.model.path)
             if vllm_mode == 'customized':
@@ -431,7 +431,7 @@ class ActorRolloutRefWorker(Worker):
                 optimizer=self.actor.actor_optimizer,
                 lr_scheduler=self.actor_lr_scheduler,
                 processing_class=self.processor if self.processor is not None else self.tokenizer,
-                checkpoint_contents=self.config.actor.checkpoint.contents)
+                checkpoint_contents=self.config.actor.checkpoint.save_contents)
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_actor(self, data: DataProto):
@@ -801,7 +801,7 @@ class CriticWorker(Worker):
             optimizer=self.critic_optimizer,
             lr_scheduler=self.critic_lr_scheduler,
             processing_class=self.processor if self.processor is not None else self.tokenizer,
-            checkpoint_contents=self.config.checkpoint.contents)
+            checkpoint_contents=self.config.checkpoint.save_contents)
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_values(self, data: DataProto):
