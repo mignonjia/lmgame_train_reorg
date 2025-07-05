@@ -1,7 +1,7 @@
 """
 Adapted from the nicely written code from gym_sokoban
 """
-from .env import SokobanEnv
+from .sokobanEnv import SokobanTrainEnv
 from .config import SokobanEnvConfig
 
-__all__ = ["SokobanEnv", "SokobanEnvConfig"]
+__all__ = ["SokobanTrainEnv", "SokobanEnvConfig"]

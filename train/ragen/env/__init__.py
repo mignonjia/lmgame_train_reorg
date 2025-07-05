@@ -1,5 +1,5 @@
 from .sokoban.config import SokobanEnvConfig
-from .sokoban.env import SokobanEnv
+from .sokoban.sokobanEnv import SokobanTrainEnv 
 from .tetris.env import TetrisEnv
 from .tetris.config import TetrisEnvConfig
 from .blocksworld.env import BlocksworldEnv
@@ -9,7 +9,7 @@ from .gsm8k.config import GSM8KEnvConfig
 
 
 REGISTERED_ENVS = {
-    'sokoban': SokobanEnv,
+    'sokoban': SokobanTrainEnv,
     'tetris': TetrisEnv,
     'blocksworld': BlocksworldEnv,
     'gsm8k': GSM8KEnv,
