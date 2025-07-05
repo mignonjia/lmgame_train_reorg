@@ -8,6 +8,8 @@
 **/playground
 **/wandb
 **/verl_local
+*.ipynb
+config/ppo_train_local.yaml
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
