@@ -38,8 +38,8 @@ actor_rollout_ref:
     temperature: 1
     rollout_filter_ratio: 0.25
     rollout_filter_type: std # max_mean or std
-    enforce_eager: False
-    free_cache_engine: False
+    enforce_eager: True
+    free_cache_engine: True
     val_kwargs:
       do_sample: False
       temperature: 0

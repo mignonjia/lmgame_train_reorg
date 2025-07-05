@@ -15,25 +15,17 @@ from tqdm import tqdm
 
 import ray
 import numpy as np
-from codetiming import Timer
 from omegaconf import OmegaConf, open_dict
 from verl import DataProto
-from verl.protocol import pad_dataproto_to_divisor, unpad_dataproto
 from verl.single_controller.base import Worker
-from verl.single_controller.ray import RayResourcePool, RayWorkerGroup, RayClassWithInitArgs
-from verl.single_controller.ray.base import create_colocated_worker_cls
-from verl.trainer.ppo import core_algos
-from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
+from verl.single_controller.ray import RayWorkerGroup
 from verl.trainer.ppo.metric_utils import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
 from verl.utils.checkpoint.checkpoint_manager import find_latest_ckpt_path
-from verl.utils.dataset.rl_dataset import RLHFDataset, collate_fn
-from torch.utils.data import RandomSampler, SequentialSampler
-from torchdata.stateful_dataloader import StatefulDataLoader
 import time
 
 WorkerType = Type[Worker]
 
-from verl.trainer.ppo.ray_trainer import Role, AdvantageEstimator, ResourcePoolManager, compute_advantage, compute_response_mask
+from verl.trainer.ppo.ray_trainer import Role, AdvantageEstimator, ResourcePoolManager, compute_advantage, compute_response_mask, apply_kl_penalty
 from verl.utils.debug import marked_timer
 from verl.trainer.ppo.ray_trainer import RayPPOTrainer as VerlRayPPOTrainer
 
@@ -42,36 +34,6 @@ from verl.utils.torch_functional import masked_mean
 
 from ragen.llm_agent.agent_proxy import LLMAgentProxy
 from ragen.utils import GenerationsLogger
-
-def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.AdaptiveKLController, kl_penalty='kl'):
-    responses = data.batch['responses']
-    response_length = responses.size(1)
-    token_level_scores = data.batch['token_level_scores']
-    batch_size = data.batch.batch_size[0]
-    response_mask = data.batch['response_mask']
-
-    # compute kl between ref_policy and current policy
-    if 'ref_log_prob' in data.batch.keys():
-        kld = core_algos.kl_penalty(data.batch['old_log_probs'], data.batch['ref_log_prob'],
-                                    kl_penalty=kl_penalty)  # (batch_size, response_length)
-        kld = kld * response_mask
-        beta = kl_ctrl.value
-    else:
-        beta = 0
-        kld = torch.zeros_like(response_mask, dtype=torch.float32)
-
-    token_level_rewards = token_level_scores - beta * kld
-
-    current_kl = masked_mean(kld, mask=response_mask, axis=-1)  # average over sequence
-    current_kl = torch.mean(current_kl, dim=0).item()
-
-    # according to https://github.com/huggingface/trl/blob/951ca1841f29114b969b57b26c7d3e80a39f75a0/trl/trainer/ppo_trainer.py#L837
-    kl_ctrl.update(current_kl=current_kl, n_steps=batch_size)
-    data.batch['token_level_rewards'] = token_level_rewards
-
-    metrics = {'critic/kl': current_kl, 'critic/kl_coeff': beta}
-
-    return data, metrics
 
 
 class RayAgentTrainer(VerlRayPPOTrainer):
@@ -320,29 +282,6 @@ class RayAgentTrainer(VerlRayPPOTrainer):
                     inputs, outputs, scores = _process_batch_for_logging(batch)
                     # self._maybe_log_generations(inputs=inputs, outputs=outputs, scores=scores, _type='train')
 
-
-
-
-
-                if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
-                    # TODO: check if this is correct. Not tested yer
-                    logger.log("[NotImplemented] REMAX implementation is not tested yet in RAGEN. Exiting.")
-                    exit()
-                    with marked_timer('gen_max', timing_raw):
-                        gen_baseline_batch = deepcopy(batch)
-                        gen_baseline_batch.meta_info['do_sample'] = False
-                        gen_baseline_output = self.agent_proxy.rollout(gen_baseline_batch, val=False)
-
-                        batch = batch.union(gen_baseline_output)
-                        reward_baseline_tensor = self.reward_fn(batch)
-                        reward_baseline_tensor = reward_baseline_tensor.sum(dim=-1)
-
-                        batch.pop(batch_keys=list(gen_baseline_output.batch.keys()))
-
-                        batch.batch['reward_baselines'] = reward_baseline_tensor
-
-                        del gen_baseline_batch, gen_baseline_output
-
                 # batch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))],
                                                             # dtype=object)
                 # repeat to align with repeated responses in rollout
@@ -410,7 +349,7 @@ class RayAgentTrainer(VerlRayPPOTrainer):
 
                     # compute rewards. apply_kl_penalty if available
                     if self.config.algorithm.use_kl_in_reward:
-                        batch, kl_metrics = apply_kl_penalty(batch, kl_ctrl=self.kl_ctrl_in_reward, kl_penalty=self.config.algorithm.kl_penalty)
+                        batch, kl_metrics = apply_kl_penalty(batch, kl_ctrl=self.kl_ctrl_in_reward, kl_penalty=self.config.algorithm.kl_penalty, multi_turn=True)
                         metrics.update(kl_metrics)
                     else:
                         batch.batch["token_level_rewards"] = batch.batch["token_level_scores"]

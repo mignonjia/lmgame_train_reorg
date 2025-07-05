@@ -35,4 +35,4 @@ EVAL_ALL_TASKS_SMALL_SET="es_manager.val.env_groups=704 es_manager.val.env_confi
 EVAL_ALL_TASKS_LARGE_SET="es_manager.val.env_groups=2516 es_manager.val.env_configs.tags=[SimpleSokoban,LargerSokoban_Dim_8,Tetris_1,Tetris_2,GSM8K,GSM8K_Turn_5,GSM8K_NoThink,GSM8K_NoThink_Turn_5,Blocksworld3_Text,Blocksworld3_1D,Blocksworld3_Sparse] es_manager.val.env_configs.n_groups=[256,256,256,256,256,256,256,256,156,156,156]"
 
 # Training commands 
-python train.py --config-name $CONFIG_NAME_SOKOBAN $ALL_GPUS $MODEL_7B_INSTRUCT $INIT_MODE $TRAIN_SOKOBAN $THINK $EVAL_SOKOBAN 2>&1 | tee "train_sokoban_7b_no_eager.log"
+python train.py --config-name $CONFIG_NAME_SOKOBAN $ALL_GPUS $MODEL_7B_INSTRUCT $INIT_MODE $TRAIN_SOKOBAN $THINK $EVAL_SOKOBAN 2>&1 | tee "train_sokoban_7b_mp.log"
