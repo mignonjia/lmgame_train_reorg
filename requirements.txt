@@ -16,9 +16,6 @@ transformers
 vllm==0.8.2
 wandb
 gymnasium[toy-text]
-
-verl==0.4.1
-
 pyarrow>=15.0.0
 pylatexenc
 torchdata

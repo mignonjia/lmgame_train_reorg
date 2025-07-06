@@ -53,11 +53,11 @@ main() {
     eval "$(conda shell.bash hook)"
     conda activate lmgame
 
-    # # Install package in editable mode
-    # print_step "setting up verl..."
-    # cd verl
-    # pip install -e . --no-dependencies # we put dependencies in lmgame/requirements.txt
-    # cd ..
+    # Install package in editable mode
+    print_step "setting up verl..."
+    cd verl
+    pip install -e . --no-dependencies # we put dependencies in lmgame/requirements.txt
+    cd ..
     
     # Install package in editable mode
     print_step "Installing lmgame_train package..."
