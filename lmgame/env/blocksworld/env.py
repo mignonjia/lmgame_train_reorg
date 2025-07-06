@@ -27,7 +27,7 @@ class BlocksworldEnv(BaseDiscreteActionEnv):
         self.config = config or BlocksworldEnvConfig()
         self.num_blocks = self.config.num_blocks
         self.render_mode = self.config.render_mode
-        self.all_states = json.load(open(f'ragen/env/blocksworld/blocksworld-{str(self.num_blocks)}.json'))
+        self.all_states = json.load(open(f'lmgame/env/blocksworld/blocksworld-{str(self.num_blocks)}.json'))
         self.blocks_ids = [i+1 for i in range(self.num_blocks)]
         
         # Define action space: [block_to_move, destination]

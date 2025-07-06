@@ -68,7 +68,7 @@ algorithm:
     kl_coef: 0.001
 
 trainer:
-  project_name: ragen_mix_3b_base #ragen_sokoban_3b_0418 # 
+  project_name: lmgame
   experiment_name: train_mix
   total_training_steps: 1
   validation_steps: 1 # validation instances = validation_steps * val_env_groups * group_size

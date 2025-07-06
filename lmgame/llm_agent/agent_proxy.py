@@ -122,7 +122,7 @@ class LLMAgentProxy:
 
 @hydra.main(version_base=None, config_path="../../config", config_name="base")
 def main(config):
-	# detect config name from python -m ragen.llm_agent.agent_proxy --config_name frozen_lake
+	# detect config name from python -m lmgame.llm_agent.agent_proxy --config_name frozen_lake
 	os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 	os.environ["CUDA_VISIBLE_DEVICES"] = str(config.system.CUDA_VISIBLE_DEVICES)
 	tokenizer = AutoTokenizer.from_pretrained(config.actor_rollout_ref.model.path)
@@ -144,7 +144,7 @@ def main(config):
 
 # @hydra.main(version_base=None, config_path="../../config", config_name="evaluate_api_llm")
 # def main(config):
-# 	# detect config name from python -m ragen.llm_agent.agent_proxy --config_name frozen_lake
+# 	# detect config name from python -m lmgame.llm_agent.agent_proxy --config_name frozen_lake
 # 	tokenizer = AutoTokenizer.from_pretrained(config.actor_rollout_ref.model.path)
 # 	actor_wg = ApiCallingWrapperWg(config, tokenizer)
 # 	proxy = LLMAgentProxy(config, actor_wg, tokenizer)
