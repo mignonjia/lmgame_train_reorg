@@ -21,11 +21,11 @@ from gymnasium.core import RenderFrame
 # the player; if a box is in the chosen direction and the square beyond is free, the
 # box will be pushed automatically.
 ACTION_LOOKUP = {
-    0: 'no operation',
-    1: 'up',
-    2: 'down',
-    3: 'left',
-    4: 'right',
+    0: 'Noop',
+    1: 'Up',
+    2: 'Down',
+    3: 'Left',
+    4: 'Right',
 }
 
 CHANGE_COORDINATES = { # (row_change, col_change)
@@ -39,7 +39,13 @@ ASSET_DIR = os.path.join(os.path.dirname(__file__), "assets", "images")
 LEVELS_FILE_PATH = os.path.join(os.path.dirname(__file__), "assets", "levels.txt")
 
 ROOM_STATE_TO_CHAR = {
-    0: '#', 1: ' ', 2: '?', 3: '*', 4: '$', 5: '@', 6: '+'
+    0: '#',  # Wall
+    1: '_',  # Empty / Floor
+    2: 'O',  # Target
+    3: '√',  # Box on target
+    4: 'X',  # Box
+    5: 'P',  # Player
+    6: 'S',  # Player on target
 }
 CHAR_TO_ROOM_STATE = {v: k for k, v in ROOM_STATE_TO_CHAR.items()}
 
@@ -261,10 +267,10 @@ class SokobanEnv(gym.Env):
                 char = level_str_lines[r][c]
                 if char == '#': # Wall
                     _room_fixed[r, c] = 0
-                elif char == '?': # Target
+                elif char in ['O', '?']: # Target (new 'O' or legacy '?')
                     _room_fixed[r, c] = 2
-                # For '$', '*', '@', the underlying _room_fixed is floor (1), which is the default.
-                # If '*' implies a target, it's handled in the second pass by explicitly setting _room_fixed.
+                # For 'X', 'P', 'S', the underlying _room_fixed is floor (1), which is the default.
+                # If '√' implies a target, it's handled in the second pass by explicitly setting _room_fixed.
 
         _room_state = _room_fixed.copy() # Initialize _room_state based on fixed layout
 
@@ -272,30 +278,31 @@ class SokobanEnv(gym.Env):
         for r in range(rows):
             for c in range(cols):
                 char = level_str_lines[r][c]
-                if char == '$': # Box
-                    if _room_fixed[r, c] == 2: # Box placed on a target square (e.g. '$' on a '?')
+                if char in ['X', '$']: # Box (new 'X' or legacy '$')
+                    if _room_fixed[r, c] == 2: # Box placed on a target square
                         _room_state[r, c] = 3 # Box on Target
                     else: # Box on Floor
                         _room_state[r, c] = 4 # Box
                     _num_boxes += 1
-                elif char == '*': # Box explicitly on Target
+                elif char in ['√', '*']: # Box explicitly on Target (new '√' or legacy '*')
                     _room_fixed[r, c] = 2 # Ensure underlying fixed map shows a target
                     _room_state[r, c] = 3 # Box on Target
                     _num_boxes += 1
-                elif char == '@': # Player
-                    if _room_fixed[r, c] == 2: # Player on a Target square (e.g. '@' on a '?')
-                        _room_state[r, c] = 6 # Player on Target
-                    else: # Player on Floor
-                        _room_state[r, c] = 5 # Player on Floor
+                elif char in ['P', '@']: # Player on Floor (new 'P' or legacy '@')
+                    _room_state[r, c] = 5  # Player on Floor
                     _player_pos_list.append(np.array([r, c]))
-                # The character '+' for player on target is not used by the provided levels.txt
+                elif char in ['S', '+']: # Player explicitly on Target (new 'S' or legacy '+')
+                    _room_fixed[r, c] = 2
+                    _room_state[r, c] = 6
+                    _player_pos_list.append(np.array([r, c]))
+                # Accept both new and legacy character sets for backward compatibility.
         
         self.room_fixed = _room_fixed
         self.room_state = _room_state
         self.num_boxes_current = _num_boxes
 
-        if not _player_pos_list: # No player '@' found in level string
-            print("[SokobanEnv] Warning: No player '@' found in level. Attempting to place player on an available floor or target square.")
+        if not _player_pos_list: # No player 'P' found in level string
+            print("[SokobanEnv] Warning: No player 'P' found in level. Attempting to place player on an available floor or target square.")
             # Try to find a floor or target square to place the player
             available_squares = np.argwhere((self.room_state == 1) | (self.room_state == 2)) # Floor or Empty Target
             if available_squares.size > 0:
@@ -512,11 +519,12 @@ class SokobanEnv(gym.Env):
         
         item_map = {
             '#': 'Wall',
-            '@': 'Worker',
-            '$': 'Box',
-            '?': 'Dock',
-            '*': 'Box on Dock',
-            ' ': 'Empty'
+            'P': 'Worker',
+            'S': 'Worker on Dock',
+            'X': 'Box',
+            'O': 'Dock',
+            '√': 'Box on Dock',
+            '_': 'Empty'
         }
         
         table_rows = [header, line_separator]
@@ -715,3 +723,125 @@ class SokobanEnv(gym.Env):
 
 
 # ------------------------- Sokoban 1989 Training Environment -------------------------
+
+# NOTE: The previous training environment lived in `env.py`.  It is now merged here
+# as `SokobanTrainEnv` so we can remove the extra file.
+
+from gym_sokoban.envs.sokoban_env import SokobanEnv as GymSokobanEnv
+from ragen.env.sokoban.config import SokobanEnvConfig
+from ragen.utils import all_seed
+
+
+class SokobanTrainEnv(GymSokobanEnv):
+    """Light-weight training wrapper around `gym_sokoban`.
+
+    This implementation is the same logic that used to live in
+    `train/ragen/env/sokoban/env.py`, but without the `BaseDiscreteActionEnv`
+    dependency.  It keeps the simple 4-direction discrete action space (1–4)
+    and exposes text / RGB rendering helpers used by the RAGEN agent code.
+    """
+
+    def __init__(self, config: Optional[SokobanEnvConfig] = None, **kwargs):
+        import gym  # local import to avoid mandatory dependency for evaluation
+
+        # Configuration
+        self.config = config or SokobanEnvConfig()
+        self.GRID_LOOKUP = self.config.grid_lookup
+        self.ACTION_LOOKUP = self.config.action_lookup
+        self.search_depth = self.config.search_depth
+
+        # Action space (1-4).  We deliberately keep the original "start=1"
+        # behaviour for backward compatibility with pre-trained agents.
+        self.ACTION_SPACE = gym.spaces.discrete.Discrete(4, start=1)
+
+        # Render mode ("text" or "rgb_array")
+        self.render_mode = self.config.render_mode
+
+        # Initialise the underlying gym-sokoban environment
+        super().__init__(
+            dim_room=self.config.dim_room,
+            max_steps=self.config.max_steps,
+            num_boxes=self.config.num_boxes,
+            **kwargs,
+        )
+
+    # ------------------------------------------------------------------
+    # Standard gym overrides / convenience helpers
+    # ------------------------------------------------------------------
+
+    def reset(self, seed: Optional[int] = None):
+        """Reset using the custom procedural level generator."""
+        try:
+            with all_seed(seed):
+                from .utils import generate_room  # local import (heavy)
+
+                (
+                    self.room_fixed,
+                    self.room_state,
+                    self.box_mapping,
+                    _,
+                ) = generate_room(
+                    dim=self.dim_room,
+                    num_steps=self.num_gen_steps,
+                    num_boxes=self.num_boxes,
+                    search_depth=self.search_depth,
+                )
+
+            # House-keeping counters
+            self.num_env_steps = 0
+            self.reward_last = 0
+            self.boxes_on_target = 0
+            self.player_position = np.argwhere(self.room_state == 5)[0]
+
+            return self.render()
+        except (RuntimeError, RuntimeWarning):
+            # Retry with a different seed to avoid dead procedural generators
+            next_seed = abs(hash(str(seed))) % (2**32) if seed is not None else None
+            return self.reset(next_seed)
+
+    def step(self, action: int):
+        """One environment step using underlying gym-sokoban."""
+        previous_pos = self.player_position.copy()
+
+        _, reward, done, _ = super().step(action)
+
+        next_obs = self.render()
+        action_effective = not np.array_equal(previous_pos, self.player_position)
+
+        info = {
+            "action_is_effective": action_effective,
+            "action_is_valid": True,
+            "success": self.boxes_on_target == self.num_boxes,
+        }
+
+        return next_obs, reward, done, info
+
+    # ------------------------------------------------------------------
+    # Rendering helpers
+    # ------------------------------------------------------------------
+
+    def render(self, mode: Optional[str] = None):  # type: ignore[override]
+        render_mode = mode if mode is not None else self.render_mode
+
+        if render_mode == "text":
+            # Replace worker-on-target for nicer printing
+            room = np.where(
+                (self.room_state == 5) & (self.room_fixed == 2), 6, self.room_state
+            )
+            return "\n".join(
+                "".join(self.GRID_LOOKUP.get(cell, "?") for cell in row)
+                for row in room.tolist()
+            )
+        elif render_mode == "rgb_array":
+            return self.get_image(mode="rgb_array", scale=1)
+        else:
+            raise ValueError(f"Invalid mode: {render_mode}")
+
+    # Convenience wrappers ------------------------------------------------
+
+    def get_all_actions(self) -> List[int]:
+        return list(self.ACTION_LOOKUP.keys())
+
+    def close(self):
+        self.render_cache = None  # type: ignore[attr-defined]
+        super().close()
