@@ -12,8 +12,8 @@ from verl import DataProto
 from verl.utils.dataset.rl_dataset import collate_fn
 from transformers import AutoTokenizer
 import hydra
-from ragen.utils import register_resolvers
-from ragen.env import REGISTERED_ENV_CONFIGS
+from lmgame.utils import register_resolvers
+from lmgame.env import REGISTERED_ENV_CONFIGS
 from tensordict import TensorDict
 
 from dataclasses import asdict

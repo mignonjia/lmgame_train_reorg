@@ -32,8 +32,8 @@ from verl.trainer.ppo.ray_trainer import RayPPOTrainer as VerlRayPPOTrainer
 import torch
 from verl.utils.torch_functional import masked_mean
 
-from ragen.llm_agent.agent_proxy import LLMAgentProxy
-from ragen.utils import GenerationsLogger
+from lmgame.llm_agent.agent_proxy import LLMAgentProxy
+from lmgame.utils import GenerationsLogger
 
 
 class RayAgentTrainer(VerlRayPPOTrainer):

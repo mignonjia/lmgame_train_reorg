@@ -4,8 +4,8 @@ import numpy as np
 from datasets import load_dataset
 import re
 import random
-from ragen.env.base import BaseLanguageBasedEnv
-from ragen.utils import all_seed
+from lmgame.env.base import BaseLanguageBasedEnv
+from lmgame.utils import all_seed
 from .config import GSM8KEnvConfig
 from collections import defaultdict
 from openai import OpenAI

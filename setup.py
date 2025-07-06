@@ -3,16 +3,16 @@ import os
 import sys
 
 setup(
-    name='ragen',
-    version='0.1',
+    name='lmgame',
+    version='0',
     package_dir={'': '.'},
-    packages=find_packages(include=['ragen']),
-    author='RAGEN Team',
+    packages=find_packages(include=['lmgame']),
+    author='lmgame Team',
     author_email='',
     acknowledgements='',
     description='',
     install_requires=[], 
-    package_data={'ragen': ['*/*.md']},
+    package_data={'lmgame': ['*/*.md']},
     classifiers=[
         'Development Status :: 4 - Beta',
         'Intended Audience :: Science/Research',

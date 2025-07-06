@@ -1,11 +1,11 @@
 import numpy as np
 import random
 from typing import Tuple, Dict, Any, List
-from ragen.env.base import BaseDiscreteActionEnv
-from ragen.env.tetris.config import TetrisEnvConfig
+from lmgame.env.base import BaseDiscreteActionEnv
+from lmgame.env.tetris.config import TetrisEnvConfig
 import gym
 import copy
-from ragen.utils import all_seed
+from lmgame.utils import all_seed
 
 def is_occupied(shape, anchor, board):
     for i, j in shape:

@@ -1,7 +1,7 @@
 import gym
 import numpy as np
-from ragen.env.base import BaseDiscreteActionEnv
-from ragen.env.blocksworld.config import BlocksworldEnvConfig
+from lmgame.env.base import BaseDiscreteActionEnv
+from lmgame.env.blocksworld.config import BlocksworldEnvConfig
 
 import copy
 import json

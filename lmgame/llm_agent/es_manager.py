@@ -10,8 +10,8 @@ import hydra
 import random
 import numpy as np
 
-from ragen.env import REGISTERED_ENVS, REGISTERED_ENV_CONFIGS
-from ragen.utils import register_resolvers
+from lmgame.env import REGISTERED_ENVS, REGISTERED_ENV_CONFIGS
+from lmgame.utils import register_resolvers
 register_resolvers()
 
 @dataclass

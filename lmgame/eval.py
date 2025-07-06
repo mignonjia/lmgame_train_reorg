@@ -1,6 +1,6 @@
 
-from ragen.llm_agent.ctx_manager import ContextManager
-from ragen.llm_agent.es_manager import EnvStateManager
+from lmgame.llm_agent.ctx_manager import ContextManager
+from lmgame.llm_agent.es_manager import EnvStateManager
 from vllm import LLM, SamplingParams
 from verl.single_controller.ray.base import RayWorkerGroup
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -9,11 +9,11 @@ import hydra
 import os
 from typing import List, Dict
 from verl.protocol import pad_dataproto_to_divisor, unpad_dataproto
-from ragen.llm_agent.agent_proxy import VllmWrapperWg, LLMAgentProxy
+from lmgame.llm_agent.agent_proxy import VllmWrapperWg, LLMAgentProxy
 
 @hydra.main(version_base=None, config_path="../config", config_name="base")
 def main(config):
-	# detect config name from python -m ragen.llm_agent.agent_proxy --config_name frozen_lake
+	# detect config name from python -m lmgame.llm_agent.agent_proxy --config_name frozen_lake
 	os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 	os.environ["CUDA_VISIBLE_DEVICES"] = str(config.system.CUDA_VISIBLE_DEVICES)
 	tokenizer = AutoTokenizer.from_pretrained(config.actor_rollout_ref.model.path)
