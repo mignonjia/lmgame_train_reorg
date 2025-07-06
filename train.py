@@ -3,7 +3,7 @@ Borrowed from verl.trainer.main_ppo.py
 Note that we don't combine the main with ray_trainer as ray_trainer is used by other main.
 """
 
-from ragen.trainer.agent_trainer import RayAgentTrainer
+from lmgame.trainer.agent_trainer import RayAgentTrainer
 
 import ray
 import hydra
@@ -11,7 +11,7 @@ import os
 from verl import DataProto
 import torch
 import numpy as np
-from ragen.utils import register_resolvers
+from lmgame.utils import register_resolvers
 register_resolvers()
 import sys
 
@@ -182,7 +182,7 @@ class TaskRunner:
         # define worker classes
         if config.actor_rollout_ref.actor.strategy == 'fsdp':
             assert config.actor_rollout_ref.actor.strategy == config.critic.strategy
-            from ragen.workers.fsdp_workers import ActorRolloutRefWorker, CriticWorker
+            from verl.workers.fsdp_workers import ActorRolloutRefWorker, CriticWorker
             from verl.single_controller.ray import RayWorkerGroup
             ray_worker_group_cls = RayWorkerGroup
 
@@ -237,7 +237,7 @@ class TaskRunner:
         # - The reward type depends on the tag of the data
         if config.reward_model.enable:
             if config.reward_model.strategy == 'fsdp':
-                from ragen.workers.fsdp_workers import RewardModelWorker
+                from verl.workers.fsdp_workers import RewardModelWorker
             elif config.reward_model.strategy == 'megatron':
                 from verl.workers.megatron_workers import RewardModelWorker
             else:

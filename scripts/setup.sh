@@ -43,8 +43,8 @@ main() {
     # Create and activate conda environment
     # if not exists, create it
     if ! conda env list | grep -q "lmgame"; then
-        print_step "Creating conda environment 'lmgame' with Python 3.12..."
-        conda create -n lmgame python=3.12 -y
+        print_step "Creating conda environment 'lmgame' with Python >=3.10..."
+        conda create -n lmgame "python>=3.10" -y
     else
         print_step "Conda environment 'lmgame' already exists"
     fi
@@ -60,7 +60,7 @@ main() {
     cd ..
     
     # Install package in editable mode
-    print_step "Installing lmgame package..."
+    print_step "Installing lmgame_train package..."
     pip install -e .
     
     # Install PyTorch with CUDA if available
