@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import re
 from verl import DataProto
 from verl.utils.dataset.rl_dataset import collate_fn
-from transformers import AutoTokenizer, AutoProcessor
+from transformers import AutoTokenizer
 import hydra
 from lmgame.utils import register_resolvers
 from lmgame.env import REGISTERED_ENV_CONFIGS
@@ -211,9 +211,6 @@ class ContextManager:
         """
         llm_input_texts = []
         messages_list = [] # for api calling
-        all_multi_modal_data = []  # Store image data for each env_output
-        all_multi_modal_inputs = []  # Store processed multi-modal inputs
-        
         for env_output in env_outputs:
             env_id = env_output['env_id']
             env_tag = self.env_config_lookup[env_id]['tag']
@@ -224,55 +221,18 @@ class ContextManager:
                 {"role": "user", "content": self.prefix_lookup[env_output["env_id"]]}
             ]
 
-            # Collect images from the state if any
-            multi_modal_data = {"image": [], "video": []}
-            
             for idx, content in enumerate(env_output["history"]):
                 if "NoThink" not in env_tag and "NoAction" not in env_tag:
                     messages[-1]["content"] += f"\nTurn {idx + 1}:\n"
                 if "state" in content:
                     FORMAT_PROMPT = "<think> [Your thoughts] </think> <answer> [your answer] </answer>" if self.config.agent_proxy.enable_think else "<answer> [your answer] </answer>"
                     LENGTH_PROMPT = f"Max response length: {self.env_config_lookup[env_output['env_id']]['max_tokens']} words (tokens)."
-                    
-                    state_content = content['state']
-                    
-                    # Check if state contains image data (RGB array or <image> token)
-                    if self.processor is not None:
-                        # Check for direct RGB image array in content
-                        if 'image' in content and content['image'] is not None:
-                            # Image passed as RGB array or PIL Image
-                            image_data = content['image']
-                            if hasattr(image_data, 'shape'):  # numpy array
-                                from PIL import Image
-                                # Convert RGB array to PIL Image
-                                if len(image_data.shape) == 3 and image_data.shape[2] == 3:
-                                    image = Image.fromarray(image_data.astype('uint8'))
-                                else:
-                                    image = Image.fromarray(image_data.astype('uint8'))
-                            else:
-                                # Assume it's already a PIL Image
-                                image = image_data
-                            
-                            multi_modal_data["image"].append(image)
-                            state_text = state_content.replace('<image>', '').strip() if '<image>' in state_content else state_content
-                            if state_text:
-                                state_text += " <image>"  # Ensure image token is present
-                            else:
-                                state_text = "<image>"
-                        elif '<image>' in state_content:
-                            # State contains <image> token but no actual image data
-                            state_text = state_content
-                        else:
-                            state_text = state_content
-                    else:
-                        state_text = state_content
-                    
                     if "NoAction" in env_tag:
-                        messages[-1]["content"] += f"Question:\n{state_text}\nAlways output: {FORMAT_PROMPT} with no extra text. Strictly follow this format.\n"
+                        messages[-1]["content"] += f"Question:\n{content['state']}\nAlways output: {FORMAT_PROMPT} with no extra text. Strictly follow this format.\n"
                     elif "NoThink" in env_tag:
-                        messages[-1]["content"] += f"Question:\n{state_text}\n"
+                        messages[-1]["content"] += f"Question:\n{content['state']}\n"
                     else:
-                        messages[-1]["content"] += f"State:\n{state_text}\nYou have {content['actions_left']} actions left. Always output: {FORMAT_PROMPT} with no extra text. Strictly follow this format. {LENGTH_PROMPT}\n"
+                        messages[-1]["content"] += f"State:\n{content['state']}\nYou have {content['actions_left']} actions left. Always output: {FORMAT_PROMPT} with no extra text. Strictly follow this format. {LENGTH_PROMPT}\n"
                 if "llm_response" in content:
                     messages.append({"role": "assistant", "content": content["llm_response"]})
                 if "reward" in content and not (prepare_for_update and idx == len(env_output["history"]) - 1):
@@ -283,49 +243,19 @@ class ContextManager:
             # NOTE: this assertion is important for loss mask computation        
             assert all(msg["role"] == "assistant" for msg in messages[2::2])
 
-            # Process with processor if available and images are present
-            if self.processor is not None and len(multi_modal_data["image"]) > 0:
-                # Use processor for multimodal input
-                raw_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=(not prepare_for_update), tokenize=False)
-                if not prepare_for_update:
-                    if "NoThink" not in env_tag:
-                        if self.config.agent_proxy.enable_think:
-                            raw_prompt += "<think>" # force the LLM to think before answering
-                        else:
-                            raw_prompt += "<answer>" # force the LLM to answer
-                
-                llm_input_texts.append(raw_prompt)
-                all_multi_modal_data.append(multi_modal_data)
-                
-                # Process multimodal inputs
-                images = multi_modal_data["image"] if multi_modal_data["image"] else None
-                videos = multi_modal_data["video"] if multi_modal_data["video"] else None
-                
-                model_inputs = self.processor(text=[raw_prompt], images=images, videos=videos, return_tensors="pt")
-                
-                # Remove input_ids and attention_mask as they'll be processed separately
-                multi_modal_inputs = {k: v for k, v in model_inputs.items() if k not in ["input_ids", "attention_mask"]}
-                all_multi_modal_inputs.append(multi_modal_inputs)
-            else:
-                # Use tokenizer for text-only input
-                text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=(not prepare_for_update), tokenize=False)
-                if not prepare_for_update:
-                    if "NoThink" not in env_tag:
-                        if self.config.agent_proxy.enable_think:
-                            text += "<think>" # force the LLM to think before answering
-                        else:
-                            text += "<answer>" # force the LLM to answer
-                llm_input_texts.append(text)
-                all_multi_modal_data.append({})
-                all_multi_modal_inputs.append({})
-            
+            text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=(not prepare_for_update), tokenize=False)
+            if not prepare_for_update:
+                if "NoThink" not in env_tag:
+                    if self.config.agent_proxy.enable_think:
+                        text += "<think>" # force the LLM to think before answering
+                    else:
+                        text += "<answer>" # force the LLM to answer
+            llm_input_texts.append(text)
             messages_list.append(messages)
 
-        # Tokenize all texts together
         inputs = self.tokenizer(llm_input_texts, return_tensors="pt", padding=True, padding_side="left", truncation=False) # do not truncate here. Process later at TODO
         input_ids, attention_mask = inputs.input_ids, inputs.attention_mask
         position_ids = attention_mask.cumsum(dim=-1)
-        
         if prepare_for_update:
             scores = [[i['reward'] for i in env_output['history']] for env_output in env_outputs]
             loss_mask, score_tensor, response_mask = get_masks_and_scores(input_ids, self.tokenizer, scores, use_turn_scores=self.config.agent_proxy.use_turn_scores)
@@ -349,11 +279,6 @@ class ContextManager:
             "group_ids": np.array([env_output["group_id"] for env_output in env_outputs], dtype=object),
             "messages_list": np.array(messages_list, dtype=object),
         }
-        
-        # Add multimodal data if any environment has images
-        if any(len(mmd.get("image", [])) > 0 for mmd in all_multi_modal_data):
-            llm_inputs.non_tensor_batch["multi_modal_data"] = np.array(all_multi_modal_data, dtype=object)
-            llm_inputs.non_tensor_batch["multi_modal_inputs"] = np.array(all_multi_modal_inputs, dtype=object)
 
         if prepare_for_update:
             metrics = {}
@@ -409,8 +334,6 @@ class ContextManager:
 def main(config):
     import json
     tokenizer = AutoTokenizer.from_pretrained(config.actor_rollout_ref.model.path)
-    processor = AutoProcessor.from_pretrained(config.actor_rollout_ref.model.path)
-
     ctx_manager = ContextManager(config=config, tokenizer=tokenizer)
     print(f"============= ctx_manager prefix =============\n {ctx_manager.prefix_lookup}")
     batch_list = [
