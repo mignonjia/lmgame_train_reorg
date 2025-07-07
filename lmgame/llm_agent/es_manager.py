@@ -59,7 +59,7 @@ class EnvStateManager:
         for tag, n_group in zip(config.env_configs.tags, config.env_configs.n_groups):
             for env_id in range(done_groups * self.group_size, (done_groups + n_group) * self.group_size):
                 cfg_template = self.sys_config.custom_envs[tag]
-                if "GSM8K" in tag or "ORZ" in tag:
+                if "GSM8K" in tag:
                     cfg_template.env_config.split = self.mode if self.mode == "train" else "test"
                 env_class = cfg_template.env_type
                 max_actions_per_traj = cfg_template.max_actions_per_traj

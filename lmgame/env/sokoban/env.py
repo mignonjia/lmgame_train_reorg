@@ -42,12 +42,12 @@ class SokobanEnv(BaseDiscreteActionEnv, GymSokobanEnv):
             return self.reset(next_seed)
         
     def step(self, action: int):
+        info = {'action_is_valid': True}
         previous_pos = self.player_position
         _, reward, done, _ = GymSokobanEnv.step(self, action) 
         next_obs = self.render()
-        action_effective = not np.array_equal(previous_pos, self.player_position)
-        info = {"action_is_effective": action_effective, "action_is_valid": True, "success": self.boxes_on_target == self.num_boxes}
-            
+        info["action_is_effective"] = not np.array_equal(previous_pos, self.player_position)
+        info["success"] = self.boxes_on_target == self.num_boxes
         return next_obs, reward, done, info
 
     def render(self, mode=None):

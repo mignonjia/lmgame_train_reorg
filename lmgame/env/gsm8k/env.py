@@ -53,7 +53,7 @@ class GSM8KEnv(BaseLanguageBasedEnv):
         self.step_num = 0
         return self.render_cache
         
-    def step(self, action):
+    def step(self, action: str):
         is_correct, is_valid = self._check_answer(action)
         # reward = 1.0 / (2 ** self.step_num) if is_correct else 0.0
         reward = 10.0 if is_correct else -0.1
@@ -64,7 +64,8 @@ class GSM8KEnv(BaseLanguageBasedEnv):
             observation = "Incorrect. Please think again."
             done = False
         self.step_num += 1
-        info = {"action_is_effective": True, "action_is_valid": is_valid, "success": is_correct}
+        # action_is_valid = action_is_effective: same meaning for math datasets
+        info = {"action_is_valid": is_valid, "action_is_effective": is_valid, "success": is_correct}
         self.render_cache = observation
         return self.render_cache, reward, done, info
     

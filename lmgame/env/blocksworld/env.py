@@ -11,15 +11,6 @@ import re
 import os
 from collections import defaultdict
 
-from dotenv import load_dotenv
-
-load_dotenv(override=True)  # Load environment variables from .env
-
-openai_api_key = os.getenv('OPENAI_API_KEY')
-claude_api_key = os.getenv('CLAUDE_API_KEY')
-gemini_api_key = os.getenv('GEMINI_API_KEY')
-together_api_key = os.getenv('TOGETHER_API_KEY')
-
 class BlocksworldEnv(BaseDiscreteActionEnv):
     metadata = {'render.modes': ['human', 'ansi']}
     
@@ -74,7 +65,7 @@ class BlocksworldEnv(BaseDiscreteActionEnv):
         except Exception as e:
             return None, None
             
-    def step(self, action):
+    def step(self, action: str):
         """Run one timestep of the environment's dynamics.
         
         Args:
@@ -90,14 +81,13 @@ class BlocksworldEnv(BaseDiscreteActionEnv):
                 - info (dict): Contains auxiliary diagnostic information
         """
         block_to_move, destination = self.extract_action(action)
-        # self.extract_numbers(action)
 
-        info = {"action_is_effective": False, "action_is_valid": False, "success": False}
+        info = {"action_is_valid": False, "action_is_effective": False, "success": False}
 
         if block_to_move is None or destination is None:
-            return self.render(), -5, False, info
+            return self.render(), -1, False, info
     
-        info['action_is_effective'] = True
+        info['action_is_valid'] = True
 
         # Check if the action is valid
         if block_to_move not in range(1, self.num_blocks + 1) or \
@@ -116,7 +106,7 @@ class BlocksworldEnv(BaseDiscreteActionEnv):
         if destination != 0 and any(pos == destination for pos in self.state):
             return self.render(), -1, False, info
         
-        info['action_is_valid'] = True
+        info['action_is_effective'] = True
         
         # Apply the move
         new_state = self.state.copy()

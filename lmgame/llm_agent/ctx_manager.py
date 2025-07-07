@@ -222,14 +222,12 @@ class ContextManager:
             ]
 
             for idx, content in enumerate(env_output["history"]):
-                if "NoThink" not in env_tag and "NoAction" not in env_tag:
+                if "NoThink" not in env_tag:
                     messages[-1]["content"] += f"\nTurn {idx + 1}:\n"
                 if "state" in content:
                     FORMAT_PROMPT = "<think> [Your thoughts] </think> <answer> [your answer] </answer>" if self.config.agent_proxy.enable_think else "<answer> [your answer] </answer>"
                     LENGTH_PROMPT = f"Max response length: {self.env_config_lookup[env_output['env_id']]['max_tokens']} words (tokens)."
-                    if "NoAction" in env_tag:
-                        messages[-1]["content"] += f"Question:\n{content['state']}\nAlways output: {FORMAT_PROMPT} with no extra text. Strictly follow this format.\n"
-                    elif "NoThink" in env_tag:
+                    if "NoThink" in env_tag:
                         messages[-1]["content"] += f"Question:\n{content['state']}\n"
                     else:
                         messages[-1]["content"] += f"State:\n{content['state']}\nYou have {content['actions_left']} actions left. Always output: {FORMAT_PROMPT} with no extra text. Strictly follow this format. {LENGTH_PROMPT}\n"

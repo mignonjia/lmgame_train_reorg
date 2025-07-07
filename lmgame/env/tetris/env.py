@@ -178,8 +178,16 @@ class TetrisEnv(BaseDiscreteActionEnv):
         Returns:
             observation, reward, done, info
         """
+        info = {
+            "action_is_valid": False,
+            "action_is_effective": False,
+            "success": False,
+            "dropped": False,
+        }
         if action not in self.actions:
-            return self.render(), 0, True, {"error": "Invalid action"}
+            return self.render(), 0, False, info
+        
+        info['action_is_valid'] = True
 
         # Store previous position
         previous_pos = copy.deepcopy(self.anchor) if self.anchor is not None else None
@@ -199,9 +207,7 @@ class TetrisEnv(BaseDiscreteActionEnv):
         self.time += 1
         reward = -0.1
         
-        done = False
-        dropped = False
-        info = {}
+        done, dropped = False, False
         
         lines_cleared = 0
         if self._has_dropped():
@@ -227,15 +233,10 @@ class TetrisEnv(BaseDiscreteActionEnv):
         self._set_piece(False)
         
         # Compute if action was effective (piece moved)
-        action_effective = previous_pos is not None and previous_pos != self.anchor
-
-        info["action_is_effective"] = action_effective
-        info["action_is_valid"] = True
+        info["action_is_effective"] = previous_pos is not None and previous_pos != self.anchor
         if lines_cleared > 0:
             done = True
             info["success"] = True
-        else:
-            info["success"] = False
         info['dropped'] = dropped
         
         return state, reward, done, info
