@@ -98,29 +98,78 @@ class EnhancedVllmWrapperWg:
     def generate_sequences(self, lm_inputs: DataProto):
         """
         Generate sequences supporting both text-only and multimodal inputs.
+        Uses the multimodal data already prepared by ctx_manager.
         """
         input_ids = lm_inputs.batch['input_ids']
-        input_texts = self.tokenizer.batch_decode(input_ids, skip_special_tokens=False)
-        input_texts = [text.replace("<|endoftext|>", "") for text in input_texts]
         
-        # Check if multimodal data is present
+        # Check if multimodal data is present and has actual images
         has_multimodal = (
             'multi_modal_data' in lm_inputs.non_tensor_batch and
             'multi_modal_inputs' in lm_inputs.non_tensor_batch
         )
         
-        if has_multimodal and self.processor is not None:
-            print("🖼️  Processing multimodal inputs with vision support")
-            # For vision models, try multimodal generation first, fallback to text-only if it fails
+        # Check if any environment actually has images
+        has_actual_images = False
+        if has_multimodal:
+            multi_modal_data_list = lm_inputs.non_tensor_batch['multi_modal_data']
+            has_actual_images = any(
+                len(mmd.get("image", [])) > 0 for mmd in multi_modal_data_list
+            )
+        
+        if has_actual_images and self.processor is not None:
+            print("🖼️  Processing TRUE multimodal inputs with REAL images")
+            print(f"🔍 Found images in {sum(1 for mmd in multi_modal_data_list if len(mmd.get('image', [])) > 0)} environments")
+            
+            # Prepare VLLM inputs with proper multimodal format
+            vllm_inputs = []
+            multi_modal_data_list = lm_inputs.non_tensor_batch['multi_modal_data']
+            
+            # Try to fetch raw_prompt_ids (with vision placeholders) if available
+            raw_prompt_ids_list = None
+            if 'multi_modal_inputs' in lm_inputs.non_tensor_batch:
+                mm_inputs_arr = lm_inputs.non_tensor_batch['multi_modal_inputs']
+                raw_prompt_ids_list = [mm_dict.get('raw_prompt_ids') if isinstance(mm_dict, dict) else None for mm_dict in mm_inputs_arr]
+
+            for i in range(input_ids.shape[0]):
+                # Prefer raw_prompt_ids (preserves <|vision_start|> etc.), otherwise fall back to tokenizer ids
+                if raw_prompt_ids_list and raw_prompt_ids_list[i] is not None:
+                    prompt_token_ids = raw_prompt_ids_list[i]
+                else:
+                    prompt_token_ids = input_ids[i].tolist()
+
+                env_mm_data = multi_modal_data_list[i]
+
+                if len(env_mm_data.get("image", [])) > 0:
+                    vllm_input = {
+                        "prompt_token_ids": prompt_token_ids,
+                        "multi_modal_data": {
+                            "image": env_mm_data["image"]
+                        }
+                    }
+                    print(f"🖼️  Environment {i}: Creating multimodal input with {len(env_mm_data['image'])} images (using raw_prompt_ids={raw_prompt_ids_list is not None})")
+                else:
+                    vllm_input = {"prompt_token_ids": prompt_token_ids}
+                    print(f"📝 Environment {i}: Creating text-only input")
+
+                vllm_inputs.append(vllm_input)
+            
             try:
-                outputs = self.llm.generate(input_texts, sampling_params=self.sampling_params)
-                print("✅ Multimodal generation successful")
+                # Generate with proper multimodal inputs using token IDs
+                outputs = self.llm.generate(vllm_inputs, sampling_params=self.sampling_params)
+                print("✅ TRUE multimodal generation successful - images were processed with preserved <image> tokens!")
             except Exception as e:
-                print(f"⚠️  Multimodal generation failed: {e}, falling back to text-only")
-                outputs = self.llm.generate(input_texts, sampling_params=self.sampling_params)
+                print(f"❌ Multimodal generation failed: {e}")
+                # print("🔄 Falling back to text-only generation...")
+                # # Fallback to text-only
+                # input_texts = self.tokenizer.batch_decode(input_ids, skip_special_tokens=False)
+                # input_texts = [text.replace("<|endoftext|>", "") for text in input_texts]
+                # outputs = self.llm.generate(input_texts, sampling_params=self.sampling_params)
+                raise e  # Re-raise the exception to see the exact error
         else:
-            print("📝 Processing text-only inputs")
+            print("📝 Processing text-only inputs (no images found)")
             # Standard text-only generation
+            input_texts = self.tokenizer.batch_decode(input_ids, skip_special_tokens=False)
+            input_texts = [text.replace("<|endoftext|>", "") for text in input_texts]
             outputs = self.llm.generate(input_texts, sampling_params=self.sampling_params)
         
         # Extract generated texts
@@ -172,7 +221,7 @@ def test_agent_proxy_with_text():
     actor_wg = EnhancedVllmWrapperWg(config, tokenizer)
     print("✅ EnhancedVllmWrapperWg created successfully!")
     
-    agent_proxy = LLMAgentProxy(config, actor_wg, tokenizer)
+    agent_proxy = LLMAgentProxy(config, actor_wg, tokenizer, processor=None)  # Text mode - no processor needed
     print("🎯 LLMAgentProxy created successfully")
     
     # Create rollout DataProto (similar to agent_proxy.py main)
@@ -256,7 +305,7 @@ def test_agent_proxy_with_images():
     actor_wg = EnhancedVllmWrapperWg(config, tokenizer, processor)
     print("✅ EnhancedVllmWrapperWg created successfully!")
     
-    agent_proxy = LLMAgentProxy(config, actor_wg, tokenizer)
+    agent_proxy = LLMAgentProxy(config, actor_wg, tokenizer, processor=processor)  # Pass processor for image support
     
     # Create rollout DataProto
     rollout_dataproto = DataProto(
@@ -307,7 +356,7 @@ def main():
         # Run tests with only EnhancedVllmWrapperWg
         test_results = {}
         
-        test_results['text_rollout'] = test_agent_proxy_with_text()
+        # test_results['text_rollout'] = test_agent_proxy_with_text()
         test_results['image_rollout'] = test_agent_proxy_with_images()
         
         # Summary

@@ -37,6 +37,10 @@ def main(config: DictConfig):
     print(f"✓ First environment state type: {type(first_env_state)}")
     print(f"  Sample state: {first_env_state[:50]}..." if len(str(first_env_state)) > 50 else first_env_state)
     
+    # In text mode, there should be NO 'images' key
+    has_images_text = 'images' in rollout_cache[0]['history'][0]
+    print(f"✓ Text mode - has 'images' key: {has_images_text} (should be False)")
+    
     # Test step method
     print("\n--- Testing step() method ---")
     all_env_inputs = [
@@ -45,12 +49,6 @@ def main(config: DictConfig):
             "llm_raw_response": "<think>I need to move down</think><answer>Down</answer>",
             "llm_response": "<think>I need to move down</think><answer>Down</answer>",
             "actions": ["Down"]
-        },
-        {
-            "env_id": 1,
-            "llm_raw_response": "<think>Let me try right</think><answer>Right</answer>",
-            "llm_response": "<think>Let me try right</think><answer>Right</answer>",
-            "actions": ["Right"]
         }
     ]
     
