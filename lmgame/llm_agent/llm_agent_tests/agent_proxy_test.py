@@ -28,6 +28,7 @@ except ImportError:
     sys.exit(1)
 
 # Enhanced VLLM Wrapper that handles both text and vision inputs
+# todo: llm.generate() doesn't support vision inputs, so we need to use another method.
 class EnhancedVllmWrapperWg:
     """Enhanced VLLM wrapper that supports both text and multimodal (vision) inputs"""
     
