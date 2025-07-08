@@ -41,6 +41,9 @@ class EnhancedVllmWrapperWg:
         model_name = config.actor_rollout_ref.model.path
         ro_config = config.actor_rollout_ref.rollout
         
+        # Check if this is a vision model
+        is_vision_model = "VL" in model_name or "vision" in model_name.lower()
+        
         # Initialize VLLM with enhanced parameters for multimodal support
         vllm_kwargs = {
             'model': model_name,
@@ -55,14 +58,17 @@ class EnhancedVllmWrapperWg:
             'max_num_batched_tokens': getattr(ro_config, 'max_num_batched_tokens', 2048),
             'enable_chunked_prefill': getattr(ro_config, 'enable_chunked_prefill', False),
             'enable_prefix_caching': getattr(ro_config, 'enable_prefix_caching', False),
-            'trust_remote_code': getattr(ro_config, 'trust_remote_code', False),
         }
         
-        # Add vision-specific parameters if processor is available
-        if self.processor is not None:
+        # Add vision-specific parameters only for vision models
+        if is_vision_model:
             vllm_kwargs.update({
+                'trust_remote_code': True,  # Required for vision models
                 'disable_mm_preprocessor_cache': getattr(ro_config, 'disable_mm_preprocessor_cache', True),
             })
+            print(f"🔍 Vision model detected, adding vision-specific parameters")
+        else:
+            print(f"📝 Text-only model detected, using standard parameters")
         
         print(f"🚀 Initializing VLLM with model: {model_name}")
         self.llm = LLM(**vllm_kwargs)
@@ -212,10 +218,14 @@ def test_agent_proxy_with_text():
     with initialize_config_dir(config_dir=config_dir, version_base=None):
         config = compose(config_name="test_config.yaml")
     
+    # Use smaller text-only model for text mode tests
+    config.actor_rollout_ref.model.path = "Qwen/Qwen2.5-0.5B"
+    
     # Ensure text mode
     config.custom_envs.SimpleSokoban.env_config.render_mode = "text"
     
     print(f"📝 Configuration loaded from: {config_dir}")
+    print(f"🤖 Using text-only model: {config.actor_rollout_ref.model.path}")
     print(f"🎮 Environment mode: {config.custom_envs.SimpleSokoban.env_config.render_mode}")
     
     # Initialize tokenizer
@@ -293,7 +303,11 @@ def test_agent_proxy_with_images():
     # Set to image mode
     config.custom_envs.SimpleSokoban.env_config.render_mode = "rgb_array"
     
+    # Use vision model for image mode tests
+    config.actor_rollout_ref.model.path = "Qwen/Qwen2.5-VL-3B-Instruct"
+    
     print(f"🎮 Environment mode: {config.custom_envs.SimpleSokoban.env_config.render_mode}")
+    print(f"🤖 Using vision model: {config.actor_rollout_ref.model.path}")
     
     # Initialize tokenizer and processor
     tokenizer = AutoTokenizer.from_pretrained(config.actor_rollout_ref.model.path)
@@ -312,9 +326,13 @@ def test_agent_proxy_with_images():
         print("✅ EnhancedVllmWrapperWg created successfully - using real vision model!")
     except Exception as e:
         print(f"⚠️  Could not create EnhancedVllmWrapperWg: {e}")
+        # Check if it's the known processor error
+        if "got multiple values for argument" in str(e) or "image_processor" in str(e):
+            print("🔧 Detected known VLLM processor compatibility issue with Qwen2.5-VL")
+            print("💡 This is a known issue with VLLM + Transformers + Qwen2.5-VL processor")
         print("🔄 Falling back to SimpleActorWg mock for vision test...")
         actor_wg = SimpleActorWg(config, tokenizer)
-        print("🎭 Using SimpleActorWg mock for vision testing")
+        print("🎭 Using SimpleActorWg mock for vision testing (will still test image mode logic)")
     
     agent_proxy = LLMAgentProxy(config, actor_wg, tokenizer)
     

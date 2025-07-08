@@ -4,8 +4,9 @@ defaults:
 system:
   CUDA_VISIBLE_DEVICES: "0"
 
-micro_batch_size_per_gpu: 2
-ppo_mini_batch_size: 8
+# Minimal batch sizes to reduce memory usage
+micro_batch_size_per_gpu: 1  # Reduced from 2
+ppo_mini_batch_size: 1       # Reduced from 8
 model_path: Qwen/Qwen2.5-VL-3B-Instruct
 
 actor_rollout_ref:
@@ -28,11 +29,11 @@ actor_rollout_ref:
   rollout:
     log_prob_micro_batch_size_per_gpu: ${micro_batch_size_per_gpu}
     tensor_model_parallel_size: 1
-    max_model_len: 8192
+    max_model_len: 4096              # Reduced from 8192
     prompt_length: 1
-    response_length: 256
-    gpu_memory_utilization: 0.2
-    max_num_batched_tokens: 2048
+    response_length: 128             # Reduced from 256
+    gpu_memory_utilization: 0.15     # Reduced from 0.2
+    max_num_batched_tokens: 1024     # Reduced from 2048
     temperature: 1
     rollout_filter_ratio: 0.25
     rollout_filter_type: std
@@ -44,8 +45,8 @@ actor_rollout_ref:
     trust_remote_code: True  # Required for Qwen2.5-VL
     disable_mm_preprocessor_cache: True  # Important for vision models
     enable_prefix_caching: False
-    # Vision model specific parameters
-    limit_mm_per_prompt: {"image": 10, "video": 1}  # Allow multiple images per prompt
+    # Vision model specific parameters - more conservative limits
+    limit_mm_per_prompt: {"image": 3, "video": 0}  # Only 1 image, no video
     val_kwargs:
       do_sample: False
       temperature: 0
@@ -68,9 +69,9 @@ algorithm:
     kl_coef: 0.001
 
 agent_proxy:
-  max_turn: 5
+  max_turn: 3                   # Reduced from 5
   action_sep: " | "
-  max_actions_per_turn: 5
+  max_actions_per_turn: 3       # Reduced from 5
   use_turn_scores: False
   enable_think: True
   reward_normalization:
@@ -81,7 +82,7 @@ es_manager:
   format_penalty: -0.1
   train:
     env_groups: 1  # Total number of environment groups
-    group_size: 2  # Environments per group
+    group_size: 1  # Reduced from 2 - only 1 environment per group
     env_configs:
       tags: ["SimpleSokoban"]
       n_groups: [1]  # Number of groups for each tag
@@ -95,13 +96,13 @@ es_manager:
 custom_envs:
   SimpleSokoban:
     env_type: "sokoban"
-    max_actions_per_traj: 10
+    max_actions_per_traj: 5       # Reduced from 10
     env_instruction: "You are solving the Sokoban puzzle. You are the player and you need to push all boxes to targets. When you are right next to a box, you can push it by moving in the same direction. You cannot push a box through a wall, and you cannot pull a box. The answer should be a sequence of actions, like <answer>Right | Right | Up</answer>."
-    max_tokens: 128
-    max_turn: 5
+    max_tokens: 64                # Reduced from 128
+    max_turn: 3                   # Reduced from 5
     env_config:
-      dim_x: 6
-      dim_y: 6
+      dim_x: 5                    # Reduced from 6
+      dim_y: 5                    # Reduced from 6
       num_boxes: 1
-      max_steps: 100
+      max_steps: 50              # Reduced from 100
       render_mode: "text"  # Default to text, will be changed to rgb_array in tests 
