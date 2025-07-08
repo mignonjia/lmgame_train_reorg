@@ -1,7 +1,6 @@
 import gym
 import numpy as np
 from lmgame.env.base import BaseDiscreteActionEnv
-from lmgame.env.blocksworld.config import BlocksworldEnvConfig
 
 import copy
 import json
@@ -16,7 +15,7 @@ class BlocksworldEnv(BaseDiscreteActionEnv):
     metadata = {'render.modes': ['human', 'ansi']}
     
     def __init__(self, config=None, **kwargs):
-        self.config = config or BlocksworldEnvConfig()
+        self.config = config
         self.num_blocks = self.config.num_blocks
         self.render_mode = self.config.render_mode
         self.all_states = json.load(open(f'lmgame/env/blocksworld/blocksworld-{str(self.num_blocks)}.json'))
@@ -349,7 +348,7 @@ class BlocksworldEnv(BaseDiscreteActionEnv):
         return self._seed(seed)
 
 
-@ray.remote(num_cpus=0.2)
+@ray.remote(num_cpus=0.1)
 class BlocksworldEnvActor:
     def __init__(self, config):
         self.env = BlocksworldEnv(config)

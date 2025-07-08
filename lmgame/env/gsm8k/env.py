@@ -6,15 +6,12 @@ import re
 import random
 from lmgame.env.base import BaseLanguageBasedEnv
 from lmgame.utils import all_seed
-from .config import GSM8KEnvConfig
-from collections import defaultdict
-from openai import OpenAI
 import os
 import json
 import ray
 
 class GSM8KEnv(BaseLanguageBasedEnv):
-    def __init__(self, config: GSM8KEnvConfig):
+    def __init__(self, config):
         super(GSM8KEnv, self).__init__()
         
         self.config = config
@@ -87,7 +84,7 @@ class GSM8KEnv(BaseLanguageBasedEnv):
     def render(self):
         return self.render_cache
 
-@ray.remote(num_cpus=0.2)
+@ray.remote(num_cpus=0.1)
 class GSM8KEnvActor:
     def __init__(self, config):
         self.env = GSM8KEnv(config)

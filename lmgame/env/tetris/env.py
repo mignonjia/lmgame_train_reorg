@@ -2,7 +2,6 @@ import numpy as np
 import random
 from typing import Tuple, Dict, Any, List
 from lmgame.env.base import BaseDiscreteActionEnv
-from lmgame.env.tetris.config import TetrisEnvConfig
 import gym
 import copy
 from lmgame.utils import all_seed
@@ -24,7 +23,7 @@ class TetrisEnv(BaseDiscreteActionEnv):
     """
     def __init__(self, config=None, **kwargs):
         super().__init__()
-        self.config = config or TetrisEnvConfig()
+        self.config = config
         self.width = self.config.dim_room[0]
         self.height = self.config.dim_room[1]
         self.board = np.zeros(shape=(self.width, self.height), dtype=np.bool_)
@@ -274,7 +273,7 @@ class TetrisEnv(BaseDiscreteActionEnv):
         return list(self.actions.keys())
 
 
-@ray.remote(num_cpus=0.2)
+@ray.remote(num_cpus=0.1)
 class TetrisEnvActor:
     def __init__(self, config):
         self.env = TetrisEnv(config)

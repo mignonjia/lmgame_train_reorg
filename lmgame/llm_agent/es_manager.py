@@ -11,7 +11,7 @@ import random
 import numpy as np
 import ray
 
-from lmgame.env import REGISTERED_ENV_ACTORS, REGISTERED_ENV_CONFIGS
+from lmgame.env import REGISTERED_ENV_ACTORS
 from lmgame.utils import register_resolvers
 register_resolvers()
 
@@ -68,6 +68,7 @@ class EnvStateManager:
                 # print(f"[DEBUG] env_id: {env_id}, tag: {tag}, split: {self.mode}, max_turn: {max_turn}")
                 
                 env_config = cfg_template.env_config
+                
                 # Create Ray actor instead of regular instance
                 env_actor = REGISTERED_ENV_ACTORS[env_class].remote(env_config)
                 entry = {'tag': tag, 'group_id': env_id // self.group_size, 'env_id': env_id, 

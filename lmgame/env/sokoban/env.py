@@ -2,9 +2,7 @@ import gym
 from gym_sokoban.envs.sokoban_env import SokobanEnv as GymSokobanEnv
 import numpy as np
 from .utils import generate_room
-# from gym_sokoban.envs.sokoban_env.utils import generate_room
 from lmgame.env.base import BaseDiscreteActionEnv
-# from lmgame.env.sokoban.config import SokobanEnvConfig
 from lmgame.utils import all_seed
 import ray
 
@@ -68,7 +66,7 @@ class SokobanEnv(BaseDiscreteActionEnv, GymSokobanEnv):
         self.render_cache = None
         super(SokobanEnv, self).close()
 
-@ray.remote(num_cpus=0.2)
+@ray.remote(num_cpus=0.1)
 class SokobanEnvActor:
     def __init__(self, config):
         self.env = SokobanEnv(config)

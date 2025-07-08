@@ -25,6 +25,7 @@ custom_envs:
     env_config: 
       max_steps: 5
       split: "train"
+      dataset_path: "openai/gsm8k"
 
   GSM8K_NoThink_Turn_5:
     env_type: gsm8k
@@ -35,6 +36,7 @@ custom_envs:
     env_config: 
       max_steps: 5
       split: "train"
+      dataset_path: "openai/gsm8k"
 
   GSM8K:
     env_type: gsm8k
@@ -45,6 +47,7 @@ custom_envs:
     env_config: 
       max_steps: 5
       split: "train"
+      dataset_path: "openai/gsm8k"
 
   GSM8K_Turn_5:
     env_type: gsm8k
@@ -55,6 +58,7 @@ custom_envs:
     env_config: 
       max_steps: 5
       split: "train"
+      dataset_path: "openai/gsm8k"
 
   Blocksworld3_Sparse:
     env_type: blocksworld
@@ -65,7 +69,7 @@ custom_envs:
     env_config:
       num_blocks: 3
       max_steps: 100
-      render_mode: '2d_sparse'
+      render_mode: '2d_sparse' # "text", "1d", "2d_compact", "2d_sparse"
 
   Blocksworld3_1D:
     env_type: blocksworld
@@ -76,7 +80,7 @@ custom_envs:
     env_config:
       num_blocks: 3
       max_steps: 100
-      render_mode: '1d'
+      render_mode: '1d' # "text", "1d", "2d_compact", "2d_sparse"
 
   Blocksworld3_Text:
     env_type: blocksworld
@@ -87,7 +91,7 @@ custom_envs:
     env_config:
       num_blocks: 3
       max_steps: 100
-      render_mode: 'text'
+      render_mode: 'text' # "text", "1d", "2d_compact", "2d_sparse"
 
   Bird:
     env_type: bird
@@ -105,10 +109,13 @@ custom_envs:
     env_instruction: "You are solving a simplified version of Tetris puzzle. The game board is a 4*4 grid, and blocks fall one at a time from the top. There is only one type of block, that is 1×1 square marked in X. Your goal is to fill the last row completely with blocks to get points, with the state such as \n____\n____\n____\n####\nYou can only move the current block left, right, or down. The answer should be a sequence of actions, like <answer>Left || Right || Down</answer> Hint: If we see empty space (_) in the last row, try to left/right move the current block to let it drop down to the empty space."
     max_tokens: 100
     env_config:
-      dim_x: 4
-      dim_y: 4
+      dim_room: [4, 4]
       max_steps: 100
       box_type: 1
+      render_mode: "text"
+      grid_lookup: {0: "_", 1: "#", 2: "X"}
+      grid_vocab: {"#": "filled spaces", "_": "empty", "X": "current block"}
+      action_lookup: {0: "Left", 1: "Right", 2: "Down"}
 
   Tetris_2:
     env_type: tetris
@@ -117,10 +124,13 @@ custom_envs:
     env_instruction: "You are solving a simplified version of Tetris puzzle. The game board is a 4*4 grid, and blocks fall one at a time from the top. Your goal is to fill the last row completely with blocks to get points, with the state such as \n____\n____\n____\n####\n. You can only move the current block left, right, or down. The answer should be a sequence of actions, like <answer>Left || Right || Down</answer> Hint: If we see empty space (_) in the last row, try to left/right move the current block to let it drop down to the empty space."
     max_tokens: 100
     env_config:
-      dim_x: 4
-      dim_y: 4
+      dim_room: [4, 4]
       max_steps: 100
       box_type: 2
+      render_mode: "text"
+      grid_lookup: {0: "_", 1: "#", 2: "X"}
+      grid_vocab: {"#": "filled spaces", "_": "empty", "X": "current block"}
+      action_lookup: {0: "Left", 1: "Right", 2: "Down"}
 
   LargerSokoban_Dim_8:
     env_type: sokoban
@@ -129,12 +139,14 @@ custom_envs:
     max_tokens: 100
     max_turn: 5
     env_config:
-      dim_x: 8
-      dim_y: 8
+      dim_room: [8, 8]
       num_boxes: 1
       max_steps: 100
       search_depth: 30
+      grid_lookup: {0: "#", 1: "_", 2: "O", 3: "√", 4: "X", 5: "P", 6: "S"}
+      grid_vocab: {"#": "wall", "_": "empty", "O": "target", "√": "box on target", "X": "box", "P": "player", "S": "player on target"}
       action_lookup: {1: "Up", 2: "Down", 3: "Left", 4: "Right"}
+      render_mode: "text"
 
   WebShop:
     env_type: webshop

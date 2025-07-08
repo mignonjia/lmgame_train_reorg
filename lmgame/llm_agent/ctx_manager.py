@@ -13,10 +13,8 @@ from verl.utils.dataset.rl_dataset import collate_fn
 from transformers import AutoTokenizer
 import hydra
 from lmgame.utils import register_resolvers
-from lmgame.env import REGISTERED_ENV_CONFIGS
 from tensordict import TensorDict
 
-from dataclasses import asdict
 register_resolvers()
 
 def get_masks_and_scores(input_ids: torch.Tensor, tokenizer: AutoTokenizer, all_scores: List[List[float]] = None, use_turn_scores: bool = False):
@@ -86,16 +84,13 @@ class ContextManager:
         for env_tag, env_config in self.config.custom_envs.items():
             if env_tag not in self.es_cfg.env_configs.tags:
                 continue
-            env_config_new = asdict(REGISTERED_ENV_CONFIGS[env_config.env_type]())
-            for k,v in env_config.items():
-                env_config_new[k] = v
-            env_instruction = env_config_new.get("env_instruction", "")
-            if env_config_new.get("grid_vocab", False):
-                grid_vocab_str = "\nThe meaning of each symbol in the state is:\n" + ", ".join([f"{k}: {v}" for k, v in env_config_new["grid_vocab"].items()])
+            env_instruction = env_config.get("env_instruction", "")
+            if env_config.get("grid_vocab", False):
+                grid_vocab_str = "\nThe meaning of each symbol in the state is:\n" + ", ".join([f"{k}: {v}" for k, v in env_config["grid_vocab"].items()])
                 env_instruction += grid_vocab_str
-            if env_config_new.get("action_lookup", False):
-                action_lookup_str = "\nYour available actions are:\n" + ", ".join([f"{v}" for k, v in env_config_new["action_lookup"].items()])
-                action_lookup_str += f"\nYou can make up to {env_config_new['max_actions_per_traj']} actions, separated by the action separator \" " + self.action_sep + " \"\n"
+            if env_config.get("action_lookup", False):
+                action_lookup_str = "\nYour available actions are:\n" + ", ".join([f"{v}" for k, v in env_config["action_lookup"].items()])
+                action_lookup_str += f"\nYou can make up to {env_config['max_actions_per_traj']} actions, separated by the action separator \" " + self.action_sep + " \"\n"
                 env_instruction += action_lookup_str
             prefixes[env_tag] = env_instruction
             env_config_lookup[env_tag] = {'max_tokens': env_config.get("max_tokens", self.config.actor_rollout_ref.rollout.response_length)}
