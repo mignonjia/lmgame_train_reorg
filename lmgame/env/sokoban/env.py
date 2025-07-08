@@ -4,24 +4,25 @@ import numpy as np
 from .utils import generate_room
 # from gym_sokoban.envs.sokoban_env.utils import generate_room
 from lmgame.env.base import BaseDiscreteActionEnv
-from lmgame.env.sokoban.config import SokobanEnvConfig
+# from lmgame.env.sokoban.config import SokobanEnvConfig
 from lmgame.utils import all_seed
+import ray
 
 class SokobanEnv(BaseDiscreteActionEnv, GymSokobanEnv):
-    def __init__(self, config=None, **kwargs):
-        self.config = config or SokobanEnvConfig()
-        self.GRID_LOOKUP = self.config.grid_lookup
-        self.ACTION_LOOKUP = self.config.action_lookup
-        self.search_depth = self.config.search_depth
+    def __init__(self, config, **kwargs):
+        self.config = config
+        self.GRID_LOOKUP = self.config['grid_lookup']
+        self.ACTION_LOOKUP = self.config['action_lookup']
+        self.search_depth = self.config['search_depth']
         self.ACTION_SPACE = gym.spaces.discrete.Discrete(4, start=1)
-        self.render_mode = self.config.render_mode
+        self.render_mode = self.config['render_mode']
 
         BaseDiscreteActionEnv.__init__(self)
         GymSokobanEnv.__init__(
             self,
-            dim_room=self.config.dim_room, 
-            max_steps=self.config.max_steps,
-            num_boxes=self.config.num_boxes,
+            dim_room=self.config['dim_room'], 
+            max_steps=self.config['max_steps'],
+            num_boxes=self.config['num_boxes'],
             **kwargs
         )
 
@@ -67,21 +68,62 @@ class SokobanEnv(BaseDiscreteActionEnv, GymSokobanEnv):
         self.render_cache = None
         super(SokobanEnv, self).close()
 
+@ray.remote(num_cpus=0.2)
+class SokobanEnvActor:
+    def __init__(self, config):
+        self.env = SokobanEnv(config)
+
+    def reset(self, seed=None):
+        return self.env.reset(seed)
+
+    def step(self, actions):
+        obs = self.env.render()
+        total_reward = 0
+        info = {'action_is_valid': False, 'action_is_effective': False, 'success': False}
+        done = False
+        executed_actions = []
+        for action in actions:
+            obs, reward, done, info = self.env.step(action)
+            total_reward += reward
+            executed_actions.append(action)
+            if done: # result[2] is done
+                break
+        return obs, total_reward, done, info, executed_actions
+
+    def get_config(self):
+        return self.env.config
+
+    def render(self, mode=None):
+        return self.env.render(mode)
+
+    def close(self):
+        self.env.close()
+
+# python -m lmgame.env.sokoban.env
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
-    config = SokobanEnvConfig(dim_room=(6, 6), num_boxes=1, max_steps=10, search_depth=5)
-    env = SokobanEnv(config)
-    for i in range(10):
-        print(env.reset(seed=1010 + i))
+    config = {
+        "dim_room": (6, 6),
+        "num_boxes": 1,
+        "max_steps": 10,
+        "search_depth": 5,
+        "grid_lookup": {0: "#", 1: "_", 2: "O", 3: "√", 4: "X", 5: "P", 6: "S"},
+        "grid_vocab": {"#": "wall", "_": "empty", "O": "target", "√": "box on target", "X": "box", "P": "player", "S": "player on target"},
+        "action_lookup": {1: "Up", 2: "Down", 3: "Left", 4: "Right"},
+        "render_mode": "text"
+    }
+    env = SokobanEnvActor.remote(config)
+    for i in range(1):
+        print(ray.get(env.reset.remote(seed=1010 + i)))
         print()
     while True:
         keyboard = input("Enter action: ")
         if keyboard == 'q':
             break
         action = int(keyboard)
-        assert action in env.ACTION_LOOKUP, f"Invalid action: {action}"
-        obs, reward, done, info = env.step(action)
-        print(obs, reward, done, info)
-    np_img = env.get_image('rgb_array')
+        obs, reward, done, info, executed_actions = ray.get(env.step.remote([action]))
+        print(f"Obs:\n{obs}")
+        print(f"Reward: {reward}, Done: {done}, Info: {info}, Executed: {executed_actions}")
+    np_img = ray.get(env.render.remote('rgb_array'))
     # save the image
     plt.imsave('sokoban1.png', np_img)

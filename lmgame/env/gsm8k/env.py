@@ -11,6 +11,7 @@ from collections import defaultdict
 from openai import OpenAI
 import os
 import json
+import ray
 
 class GSM8KEnv(BaseLanguageBasedEnv):
     def __init__(self, config: GSM8KEnvConfig):
@@ -85,6 +86,31 @@ class GSM8KEnv(BaseLanguageBasedEnv):
 
     def render(self):
         return self.render_cache
+
+@ray.remote(num_cpus=0.2)
+class GSM8KEnvActor:
+    def __init__(self, config):
+        self.env = GSM8KEnv(config)
+
+    def reset(self, seed=None):
+        return self.env.reset(seed)
+
+    def step(self, actions):
+        total_reward, info, done, executed_actions = 0, {}, False, []
+        for action in actions:
+            _, reward, done, info = self.env.step(action)
+            total_reward += reward
+            executed_actions.append(action)
+            if done: # result[2] is done
+                break
+        return total_reward, info, done, executed_actions
+
+    def render(self, mode=None):
+        return self.env.render(mode)
+
+    def close(self):
+        self.env.close()
+
 
 
 if __name__ == "__main__":

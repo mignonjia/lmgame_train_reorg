@@ -11,7 +11,7 @@ import random
 import numpy as np
 import ray
 
-from lmgame.env import REGISTERED_ENVS, REGISTERED_ENV_CONFIGS
+from lmgame.env import REGISTERED_ENV_ACTORS, REGISTERED_ENV_CONFIGS
 from lmgame.utils import register_resolvers
 register_resolvers()
 
@@ -66,13 +66,12 @@ class EnvStateManager:
                 max_actions_per_traj = cfg_template.max_actions_per_traj
                 max_turn = cfg_template.max_turn
                 # print(f"[DEBUG] env_id: {env_id}, tag: {tag}, split: {self.mode}, max_turn: {max_turn}")
-                if cfg_template.env_config is None:
-                    env_config = REGISTERED_ENV_CONFIGS[env_class]()
-                else:
-                    env_config = REGISTERED_ENV_CONFIGS[env_class](**cfg_template.env_config)
-                env_obj = REGISTERED_ENVS[env_class](env_config)
+                
+                env_config = cfg_template.env_config
+                # Create Ray actor instead of regular instance
+                env_actor = REGISTERED_ENV_ACTORS[env_class].remote(env_config)
                 entry = {'tag': tag, 'group_id': env_id // self.group_size, 'env_id': env_id, 
-                        'env': env_obj, 'config': env_config, 'status': EnvStatus(), 'max_actions_per_traj': max_actions_per_traj, 'max_turn': max_turn}
+                        'env_actor': env_actor, 'config': env_config, 'status': EnvStatus(), 'max_actions_per_traj': max_actions_per_traj, 'max_turn': max_turn}
                 
                 env_list.append(entry)
             done_groups += n_group
@@ -110,13 +109,19 @@ class EnvStateManager:
         else:
             seed = 123
         seeds = _expand_seed(seed)
+        
+        # Use Ray remote for reset (distributed processing)
+        reset_futures = []
         for seed, entry in zip(seeds, envs):
-            entry['env'].reset(seed=seed)
+            future = entry['env_actor'].reset.remote(seed=seed)
+            reset_futures.append(future)
             entry['status'] = EnvStatus(seed=seed)
-
-        # update rollout cache
-        for cache, env in zip(rollout_cache, envs):
-            next_state = self._handle_mm_state(env['env'].render())
+        
+        # Wait for all resets to complete
+        rendered_states = ray.get(reset_futures)
+        
+        for cache, env, next_state in zip(rollout_cache, envs, rendered_states):
+            next_state = self._handle_mm_state(next_state)
             cache['history'] = self._update_cache_history(cache['history'], next_state=next_state, actions_left=env['max_actions_per_traj'], num_actions_info=None)
             
 
@@ -144,20 +149,22 @@ class EnvStateManager:
         env_outputs: List[Dict]
             {env_id: int, history: List[Dict][{state: str, actions: List[str], reward: float, info: Dict, llm_response: str, llm_raw_response: str, (Optional)images: List[PIL.Image.Image]}]}
         """
-        def _execute_actions(env, actions):
-            acc_reward, turn_info, turn_done = 0, {}, False
-            executed_actions = []
-            for action in actions:
-                _, reward, done, info = env.step(action)
-                acc_reward += reward
-                turn_info.update(info) # NOTE: currently use last info for multi-action
-                executed_actions.append(action)
-                if done:
-                    turn_done = True
-                    break
-            return acc_reward, turn_info, turn_done, executed_actions
+        # def _execute_actions(env_actor, actions):
+        #     acc_reward, turn_info, turn_done = 0, {}, False
+        #     executed_actions = []
+        #     for action in actions:
+        #         # Use Ray remote for step operations (regular calls via remote)
+        #         step_future = env_actor.step.remote(action)
+        #         _, reward, done, info = ray.get(step_future)
+        #         acc_reward += reward
+        #         turn_info.update(info) # NOTE: currently use last info for multi-action
+        #         executed_actions.append(action)
+        #         if done:
+        #             turn_done = True
+        #             break
+        #     return acc_reward, turn_info, turn_done, executed_actions
 
-        def _log_env_state(status, history, cur_obs, max_actions_per_traj, executed_actions, all_actions, acc_reward, turn_done, turn_info, env_input):
+        def _log_env_state(status, history, cur_obs, max_actions_per_traj, executed_actions, acc_reward, turn_done, turn_info, env_input):
             obs = self._handle_mm_state(cur_obs)
             status.num_actions += len(executed_actions)
             status.rewards.append(acc_reward) # NOTE use turn-wise acc_reward
@@ -175,23 +182,28 @@ class EnvStateManager:
 
         envs = self.envs
         env_outputs = []
+        futures = []
 
         for env_input in all_env_inputs:
             acc_reward, turn_info, turn_done = 0, {}, False
             entry = envs[env_input['env_id']]
-            env_id, env = entry['env_id'], entry['env']
+            env_id, env_actor = entry['env_id'], entry['env_actor']
             actions_left_before = entry['max_actions_per_traj'] - entry['status'].num_actions
-
-            # print("env_input['actions']", env_input['actions'])
-            # execute actions in envs
             valid_actions = self._extract_map_valid_actions(entry, env_input['actions'])
-            # print("valid_actions", valid_actions)
-            acc_reward, turn_info, turn_done, executed_actions = _execute_actions(env, valid_actions[:actions_left_before])
-            # print("executed_actions", executed_actions)
             if len(valid_actions) != len(env_input['actions']) or not valid_actions:
                 self.rollout_cache[env_id]["penalty"] += self.sys_config.es_manager.format_penalty
+
+            future = env_actor.step.remote(valid_actions[:actions_left_before])
+            futures.append(future)
                 
-            status, history = _log_env_state(entry['status'], self.rollout_cache[env_id]['history'], entry['env'].render(), entry['max_actions_per_traj'], executed_actions, valid_actions, acc_reward, turn_done, turn_info, env_input)
+        results = ray.get(futures)
+        for env_input, result in zip(all_env_inputs, results):
+            entry = envs[env_input['env_id']]
+            env_id, env_actor = entry['env_id'], entry['env_actor']
+            current_state, acc_reward, turn_done, turn_info, executed_actions = result
+            # Get current state using Ray remote
+            # current_state = ray.get(env_actor.render.remote())
+            status, history = _log_env_state(entry['status'], self.rollout_cache[env_id]['history'], current_state, entry['max_actions_per_traj'], executed_actions, acc_reward, turn_done, turn_info, env_input)
             entry['status'] = status
             if entry['status'].num_actions >= entry['max_actions_per_traj'] and not turn_done:
                 entry['status'].truncated = True
@@ -253,7 +265,7 @@ class EnvStateManager:
     def _extract_map_valid_actions(self, entry: Dict, actions: List[str]):
         """extract valid actions from the action lookup table (if exists)"""
         mapped_actions = []
-        action_lookup = getattr(entry['env'].config, 'action_lookup', None)
+        action_lookup = getattr(entry['config'], 'action_lookup', None)
         if action_lookup is None:
             mapped_actions = actions
         else: # the envs have pre-defined action lookup
@@ -273,12 +285,13 @@ class EnvStateManager:
         return results
         
     def render(self):
-        rendered_list = [entry['env'].render() for entry in self.envs]
+        render_futures = [entry['env_actor'].render.remote() for entry in self.envs]
+        rendered_list = ray.get(render_futures)
         return rendered_list
 
     def close(self):
-        for entry in self.envs:
-            entry['env'].close()
+        close_futures = [entry['env_actor'].close.remote() for entry in self.envs]
+        ray.get(close_futures)
 
 
 

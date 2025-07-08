@@ -10,6 +10,7 @@ import subprocess
 import re
 import os
 from collections import defaultdict
+import ray
 
 class BlocksworldEnv(BaseDiscreteActionEnv):
     metadata = {'render.modes': ['human', 'ansi']}
@@ -346,6 +347,31 @@ class BlocksworldEnv(BaseDiscreteActionEnv):
     def seed(self, seed=None):
         """Set the seed for this env's random number generator."""
         return self._seed(seed)
+
+
+@ray.remote(num_cpus=0.2)
+class BlocksworldEnvActor:
+    def __init__(self, config):
+        self.env = BlocksworldEnv(config)
+
+    def reset(self, seed=None):
+        return self.env.reset(seed)
+
+    def step(self, actions):
+        total_reward, info, done, executed_actions = 0, {}, False, []
+        for action in actions:
+            _, reward, done, info = self.env.step(action)
+            total_reward += reward
+            executed_actions.append(action)
+            if done: # result[2] is done
+                break
+        return total_reward, info, done, executed_actions
+
+    def render(self, mode=None):
+        return self.env.render(mode)
+
+    def close(self):
+        self.env.close()
 
 
 if __name__ == "__main__":

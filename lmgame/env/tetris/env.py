@@ -6,6 +6,7 @@ from lmgame.env.tetris.config import TetrisEnvConfig
 import gym
 import copy
 from lmgame.utils import all_seed
+import ray
 
 def is_occupied(shape, anchor, board):
     for i, j in shape:
@@ -271,6 +272,32 @@ class TetrisEnv(BaseDiscreteActionEnv):
     def get_all_actions(self) -> List[int]:
         """Get list of all valid actions."""
         return list(self.actions.keys())
+
+
+@ray.remote(num_cpus=0.2)
+class TetrisEnvActor:
+    def __init__(self, config):
+        self.env = TetrisEnv(config)
+
+    def reset(self, seed=None):
+        return self.env.reset(seed)
+
+    def step(self, actions):
+        total_reward, info, done, executed_actions = 0, {}, False, []
+        for action in actions:
+            _, reward, done, info = self.env.step(action)
+            total_reward += reward
+            executed_actions.append(action)
+            if done: # result[2] is done
+                break
+        return total_reward, info, done, executed_actions
+
+    def render(self, mode=None):
+        return self.env.render(mode)
+
+    def close(self):
+        self.env.close()
+
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
