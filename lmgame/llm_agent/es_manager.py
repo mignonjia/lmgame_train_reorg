@@ -9,6 +9,7 @@ import PIL.Image
 import hydra
 import random
 import numpy as np
+import ray
 
 from lmgame.env import REGISTERED_ENVS, REGISTERED_ENV_CONFIGS
 from lmgame.utils import register_resolvers
@@ -83,6 +84,13 @@ class EnvStateManager:
         Reset the environments and get initial observation
         build up rollout cache like [{"env_id": int, "history": List[Dict], "group_id": int}, ...]
         """
+        # @ray.remote(num_cpus=0.2)
+        # def _reset_env(env, seed):
+        #     """reset the environment and render the initial state"""
+        #     env.reset(seed=seed)
+        #     next_state = env.render()
+        #     return env, next_state
+        
         def _expand_seed(seed: int):
             if self.mode == "train": # train
                 seeds = [[seed + i] * self.group_size for i in range(self.env_groups)] # [[seed, ..., seed], [seed+1, ..., seed+1], ...]
@@ -93,7 +101,7 @@ class EnvStateManager:
             return sum(seeds, [])
 
         envs = self.envs
-        rollout_cache = [{"env_id": entry['env_id'], "history": [], "group_id": entry['group_id'], "tag": entry['tag'], "penalty": 0} for entry in envs]
+        rollout_cache = [{"env_id": env['env_id'], "history": [], "group_id": env['group_id'], "tag": env['tag'], "penalty": 0} for env in envs]
 
         # reset all environments
         if self.mode == "train":
@@ -111,6 +119,17 @@ class EnvStateManager:
             next_state = self._handle_mm_state(env['env'].render())
             cache['history'] = self._update_cache_history(cache['history'], next_state=next_state, actions_left=env['max_actions_per_traj'], num_actions_info=None)
             
+
+        # futures = [_reset_env.remote(env['env'], seed) for env, seed in zip(envs, seeds)]
+        # results = ray.get(futures)
+        # for i, (result, cache, env) in enumerate(zip(results, rollout_cache, envs)):
+        #     new_env, next_state = result
+        #     env['env'] = new_env  # This updates the environment
+        #     env['status'] = EnvStatus(seed=seeds[i])
+        #     next_state = self._handle_mm_state(next_state)
+        #     cache['history'] = self._update_cache_history(cache['history'], next_state=next_state, actions_left=env['max_actions_per_traj'], num_actions_info=None)
+
+
         self.rollout_cache = rollout_cache
         return rollout_cache
 
