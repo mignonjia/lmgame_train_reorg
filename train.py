@@ -14,6 +14,7 @@ import numpy as np
 from lmgame.utils import register_resolvers
 register_resolvers()
 import sys
+from datetime import datetime
 
 class DummyRewardManager():
     """The reward manager.
@@ -267,6 +268,7 @@ class TaskRunner:
 
         resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
 
+        start_time = datetime.now()
         trainer = RayAgentTrainer(
             config=config,
             tokenizer=tokenizer,
@@ -279,6 +281,10 @@ class TaskRunner:
         )
         trainer.init_workers()
         trainer.init_agent_proxy()
+        
+        end_time = datetime.now()
+        print(f"trainer init time: {end_time - start_time}")
+
         trainer.fit()
 
 
