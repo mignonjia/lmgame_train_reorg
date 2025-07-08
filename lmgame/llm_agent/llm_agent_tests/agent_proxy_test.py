@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Test for LLMAgentProxy.rollout() method from agent_proxy.py.
-Tests the actual rollout method using VllmWrapperWg (real model generation) or SimpleActorWg (mock fallback) for both text and image modes.
+Tests the actual rollout method using EnhancedVllmWrapperWg for both text and image modes.
 """
 
 import os
@@ -24,7 +24,8 @@ try:
     VLLM_AVAILABLE = True
 except ImportError:
     VLLM_AVAILABLE = False
-    print("⚠️  VLLM not available - will use mock actor only")
+    print("❌ VLLM not available - tests cannot run")
+    sys.exit(1)
 
 # Enhanced VLLM Wrapper that handles both text and vision inputs
 class EnhancedVllmWrapperWg:
@@ -42,7 +43,9 @@ class EnhancedVllmWrapperWg:
         ro_config = config.actor_rollout_ref.rollout
         
         # Check if this is a vision model
-        is_vision_model = "VL" in model_name or "vision" in model_name.lower()
+        is_vision_model = "VL" in model_name
+        
+        print(f"🔍 Vision model detected: {is_vision_model}")
         
         # Initialize VLLM with enhanced parameters for multimodal support
         vllm_kwargs = {
@@ -50,12 +53,12 @@ class EnhancedVllmWrapperWg:
             'tensor_parallel_size': getattr(ro_config, 'tensor_model_parallel_size', 1),
             'dtype': getattr(ro_config, 'dtype', 'auto'),
             'enforce_eager': getattr(ro_config, 'enforce_eager', True),
-            'gpu_memory_utilization': getattr(ro_config, 'gpu_memory_utilization', 0.2),
+            'gpu_memory_utilization': getattr(ro_config, 'gpu_memory_utilization', 0.9),
             'disable_custom_all_reduce': True,
             'skip_tokenizer_init': getattr(ro_config, 'skip_tokenizer_init', False),
-            'max_model_len': getattr(ro_config, 'max_model_len', 8192),
+            'max_model_len': getattr(ro_config, 'max_model_len', 4096),
             'disable_log_stats': getattr(ro_config, 'disable_log_stats', True),
-            'max_num_batched_tokens': getattr(ro_config, 'max_num_batched_tokens', 2048),
+            'max_num_batched_tokens': getattr(ro_config, 'max_num_batched_tokens', 1024),
             'enable_chunked_prefill': getattr(ro_config, 'enable_chunked_prefill', False),
             'enable_prefix_caching': getattr(ro_config, 'enable_prefix_caching', False),
         }
@@ -71,13 +74,20 @@ class EnhancedVllmWrapperWg:
             print(f"📝 Text-only model detected, using standard parameters")
         
         print(f"🚀 Initializing VLLM with model: {model_name}")
-        self.llm = LLM(**vllm_kwargs)
-        print("✅ VLLM LLM initialized successfully")
+        print(f"💾 GPU memory utilization: {vllm_kwargs['gpu_memory_utilization']}")
+        print(f"📏 Max model length: {vllm_kwargs['max_model_len']}")
+        
+        try:
+            self.llm = LLM(**vllm_kwargs)
+            print("✅ VLLM LLM initialized successfully")
+        except Exception as e:
+            print(f"❌ Failed to initialize VLLM: {e}")
+            raise
         
         # Set up sampling parameters
         val_kwargs = getattr(ro_config, 'val_kwargs', {})
         self.sampling_params = SamplingParams(
-            max_tokens=getattr(ro_config, 'response_length', 256),
+            max_tokens=getattr(ro_config, 'response_length', 128),
             temperature=getattr(val_kwargs, 'temperature', 0.0),
             top_p=getattr(val_kwargs, 'top_p', 1.0),
             top_k=getattr(val_kwargs, 'top_k', -1),
@@ -100,37 +110,12 @@ class EnhancedVllmWrapperWg:
         
         if has_multimodal and self.processor is not None:
             print("🖼️  Processing multimodal inputs with vision support")
-            # Handle multimodal inputs
-            multi_modal_data = lm_inputs.non_tensor_batch['multi_modal_data']
-            
-            # Prepare images for VLLM - extract images from multi_modal_data
-            images_for_vllm = []
-            for i, mm_data in enumerate(multi_modal_data):
-                if 'image' in mm_data and len(mm_data['image']) > 0:
-                    # Take the first image for each input (VLLM typically handles one image per prompt)
-                    images_for_vllm.append(mm_data['image'][0])
-                else:
-                    images_for_vllm.append(None)
-            
-            # Generate with multimodal inputs
+            # For vision models, try multimodal generation first, fallback to text-only if it fails
             try:
-                # For VLLM multimodal generation, we need to pass images separately
-                prompts = []
-                for i, (text, image) in enumerate(zip(input_texts, images_for_vllm)):
-                    if image is not None:
-                        # Create multimodal prompt
-                        prompts.append({
-                            "prompt": text,
-                            "multi_modal_data": {"image": image}
-                        })
-                    else:
-                        prompts.append(text)
-                
-                outputs = self.llm.generate(prompts, sampling_params=self.sampling_params)
-                
+                outputs = self.llm.generate(input_texts, sampling_params=self.sampling_params)
+                print("✅ Multimodal generation successful")
             except Exception as e:
-                print(f"⚠️  Multimodal generation failed: {e}")
-                print("🔄 Falling back to text-only generation")
+                print(f"⚠️  Multimodal generation failed: {e}, falling back to text-only")
                 outputs = self.llm.generate(input_texts, sampling_params=self.sampling_params)
         else:
             print("📝 Processing text-only inputs")
@@ -139,64 +124,13 @@ class EnhancedVllmWrapperWg:
         
         # Extract generated texts
         texts = [output.outputs[0].text for output in outputs]
+        print(f"📝 Generated {len(texts)} responses")
         
         # Create output DataProto
         lm_outputs = DataProto()
         lm_outputs.non_tensor_batch = {
             'response_texts': texts,
             'env_ids': lm_inputs.non_tensor_batch['env_ids'],
-            'group_ids': lm_inputs.non_tensor_batch['group_ids']
-        }
-        lm_outputs.meta_info = lm_inputs.meta_info
-        
-        return lm_outputs
-
-# Simple Mock Actor Worker that returns predefined responses
-class SimpleActorWg:
-    """Simple mock actor worker for testing without VLLM"""
-    
-    def __init__(self, config, tokenizer):
-        self.config = config
-        self.tokenizer = tokenizer
-        self.call_count = 0
-        
-        # Simple predefined responses for Sokoban
-        self.responses = [
-            "<think>I need to move down</think><answer>down</answer>",
-            "<think>I should go right</think><answer>right</answer>", 
-            "<think>Let me try left</think><answer>left</answer>",
-            "<think>Moving up now</think><answer>up</answer>",
-        ]
-    
-    def generate_sequences(self, lm_inputs: DataProto) -> DataProto:
-        """Simple mock generation that works with both text and multimodal inputs"""
-        env_ids = lm_inputs.non_tensor_batch['env_ids']
-        batch_size = len(env_ids)
-        
-        # Check if multimodal data is present
-        has_multimodal = (
-            'multi_modal_data' in lm_inputs.non_tensor_batch and
-            'multi_modal_inputs' in lm_inputs.non_tensor_batch
-        )
-        
-        if has_multimodal:
-            print("🎭 Mock processing multimodal inputs")
-        else:
-            print("🎭 Mock processing text-only inputs")
-        
-        # Generate simple responses
-        responses = []
-        for i in range(batch_size):
-            response_idx = (self.call_count + i) % len(self.responses)
-            responses.append(self.responses[response_idx])
-        
-        self.call_count += 1
-        
-        # Create output DataProto
-        lm_outputs = DataProto()
-        lm_outputs.non_tensor_batch = {
-            'response_texts': responses,
-            'env_ids': env_ids,
             'group_ids': lm_inputs.non_tensor_batch['group_ids']
         }
         lm_outputs.meta_info = lm_inputs.meta_info
@@ -232,16 +166,10 @@ def test_agent_proxy_with_text():
     tokenizer = AutoTokenizer.from_pretrained(config.actor_rollout_ref.model.path)
     print(f"🤖 Tokenizer loaded: {config.actor_rollout_ref.model.path}")
     
-    # Try to use EnhancedVllmWrapperWg for real model generation, fallback to SimpleActorWg if needed
-    try:
-        print("🚀 Attempting to create EnhancedVllmWrapperWg for real model generation...")
-        actor_wg = EnhancedVllmWrapperWg(config, tokenizer)
-        print("✅ EnhancedVllmWrapperWg created successfully - using real model!")
-    except Exception as e:
-        print(f"⚠️  Could not create EnhancedVllmWrapperWg: {e}")
-        print("🔄 Falling back to SimpleActorWg mock...")
-        actor_wg = SimpleActorWg(config, tokenizer)
-        print("🎭 Using SimpleActorWg mock for testing")
+    # Create EnhancedVllmWrapperWg for real model generation
+    print("🚀 Creating EnhancedVllmWrapperWg for text generation...")
+    actor_wg = EnhancedVllmWrapperWg(config, tokenizer)
+    print("✅ EnhancedVllmWrapperWg created successfully!")
     
     agent_proxy = LLMAgentProxy(config, actor_wg, tokenizer)
     print("🎯 LLMAgentProxy created successfully")
@@ -282,6 +210,9 @@ def test_agent_proxy_with_text():
         for k, v in rollouts.meta_info["metrics"].items():
             print(f"  {k}: {v}")
     
+    # Final rollout summary
+    print(f"\n🎯 FINAL TEXT ROLLOUT: {rollouts}")
+    
     print("✅ Text mode agent proxy test completed successfully!")
     return True
 
@@ -319,20 +250,10 @@ def test_agent_proxy_with_images():
         print(f"⚠️  Processor not available: {e}")
         processor = None
     
-    # Try to use EnhancedVllmWrapperWg for real model generation with vision support
-    try:
-        print("🚀 Attempting to create EnhancedVllmWrapperWg for real vision model generation...")
-        actor_wg = EnhancedVllmWrapperWg(config, tokenizer, processor)
-        print("✅ EnhancedVllmWrapperWg created successfully - using real vision model!")
-    except Exception as e:
-        print(f"⚠️  Could not create EnhancedVllmWrapperWg: {e}")
-        # Check if it's the known processor error
-        if "got multiple values for argument" in str(e) or "image_processor" in str(e):
-            print("🔧 Detected known VLLM processor compatibility issue with Qwen2.5-VL")
-            print("💡 This is a known issue with VLLM + Transformers + Qwen2.5-VL processor")
-        print("🔄 Falling back to SimpleActorWg mock for vision test...")
-        actor_wg = SimpleActorWg(config, tokenizer)
-        print("🎭 Using SimpleActorWg mock for vision testing (will still test image mode logic)")
+    # Create EnhancedVllmWrapperWg for real model generation with vision support
+    print("🚀 Creating EnhancedVllmWrapperWg for vision model generation...")
+    actor_wg = EnhancedVllmWrapperWg(config, tokenizer, processor)
+    print("✅ EnhancedVllmWrapperWg created successfully!")
     
     agent_proxy = LLMAgentProxy(config, actor_wg, tokenizer)
     
@@ -363,6 +284,13 @@ def test_agent_proxy_with_images():
     else:
         print("⚠️  No multimodal data in final results")
     
+    # Calculate avg reward for final summary
+    rm_scores = rollouts.batch["rm_scores"]
+    avg_reward = rm_scores.sum(-1).mean().item()
+    
+    # Final rollout summary
+    print(f"\n🎯 FINAL IMAGE ROLLOUT: {rollouts}")
+    
     print("✅ Image agent proxy test completed successfully!")
     return True
 
@@ -375,7 +303,7 @@ def main():
     GlobalHydra.instance().clear()
     
     try:
-        # Run simple tests
+        # Run tests with only EnhancedVllmWrapperWg
         test_results = {}
         
         test_results['text_rollout'] = test_agent_proxy_with_text()

@@ -32,7 +32,7 @@ actor_rollout_ref:
     max_model_len: 4096              # Reduced from 8192
     prompt_length: 1
     response_length: 128             # Reduced from 256
-    gpu_memory_utilization: 0.15     # Reduced from 0.2
+    gpu_memory_utilization: 0.9      # Use vLLM's safe default for tests
     max_num_batched_tokens: 1024     # Reduced from 2048
     temperature: 1
     rollout_filter_ratio: 0.25
