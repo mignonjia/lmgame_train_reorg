@@ -72,11 +72,11 @@ class LLMAgentProxy:
 	"""
 	The proxy means the llm agent is trying to generate some rollout **at this time**, **at this model state**, **at this env state from the env config**
 	"""
-	def __init__(self, config, actor_rollout_wg, tokenizer):
+	def __init__(self, config, actor_rollout_wg, tokenizer, processor=None):
 		self.config = config
-		self.train_ctx_manager = ContextManager(config, tokenizer, mode="train")
+		self.train_ctx_manager = ContextManager(config, tokenizer, processor=processor, mode="train")
 		self.train_es_manager = EnvStateManager(config, mode="train")
-		self.val_ctx_manager = ContextManager(config, tokenizer, mode="val")
+		self.val_ctx_manager = ContextManager(config, tokenizer, processor=processor, mode="val")
 		self.val_es_manager = EnvStateManager(config, mode="val")
 		self.actor_wg = actor_rollout_wg
 		self.tokenizer = tokenizer
@@ -89,7 +89,8 @@ class LLMAgentProxy:
 			lm_outputs = unpad_dataproto(padded_lm_outputs, pad_size=pad_size)
 			lm_outputs.meta_info = lm_inputs.meta_info
 			lm_outputs.non_tensor_batch = lm_inputs.non_tensor_batch
-		elif isinstance(self.actor_wg, VllmWrapperWg) or isinstance(self.actor_wg, ApiCallingWrapperWg):
+		elif hasattr(self.actor_wg, 'generate_sequences'):
+			# Handle VllmWrapperWg, ApiCallingWrapperWg, or any other actor worker with generate_sequences method
 			lm_outputs = self.actor_wg.generate_sequences(lm_inputs)
 		else:
 			raise ValueError(f"Unsupported actor worker type: {type(self.actor_wg)}")
@@ -104,6 +105,9 @@ class LLMAgentProxy:
 		for cur_turn in range(self.config.agent_proxy.max_turn):
 			lm_inputs: DataProto = ctx_manager.get_lm_inputs(env_outputs, prepare_for_update=False)
 			lm_inputs.meta_info = dataproto.meta_info # TODO: setup vllm early stop when max length is reached. make sure this can be done
+			print(f"==============================================[DEBUG] lm_inputs ================================================")
+			print(f"{lm_inputs}")
+			print(f"==============================================[DEBUG] lm_inputs ================================================")
 			lm_outputs: DataProto = self.generate_sequences(lm_inputs)
 			
 			# lm_inputs.save_to_disk("lm_inputs.pkl")
@@ -116,6 +120,7 @@ class LLMAgentProxy:
 				break
 		# exit()
 		rollout_states = es_manager.get_rollout_states() 
+		assert rollout_states is not None, "Rollout states are None"
 		rollouts = ctx_manager.formulate_rollouts(rollout_states)
 		# self.tokenizer.batch_decode(rollouts.batch['input_ids'], skip_special_tokens=False) # see all the trajectories
 		return rollouts

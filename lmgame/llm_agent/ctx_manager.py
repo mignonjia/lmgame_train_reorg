@@ -90,12 +90,18 @@ class ContextManager:
             for k,v in env_config.items():
                 env_config_new[k] = v
             env_instruction = env_config_new.get("env_instruction", "")
-            if env_config_new.get("grid_vocab", False):
+            
+            # Skip detailed symbol descriptions if processor is available (image mode)
+            if env_config_new.get("grid_vocab", False) and self.processor is None:
                 grid_vocab_str = "\nThe meaning of each symbol in the state is:\n" + ", ".join([f"{k}: {v}" for k, v in env_config_new["grid_vocab"].items()])
                 env_instruction += grid_vocab_str
+            elif self.processor is not None:
+                # For image mode, provide concise visual analysis instructions
+                env_instruction += "\nYou can see the game state visually in the provided image. First carefully examine the layout to identify your position, box locations, target positions, and walls. Then plan your moves by reasoning about how each action will change the board state and bring boxes closer to targets."
+                
             if env_config_new.get("action_lookup", False):
                 action_lookup_str = "\nYour available actions are:\n" + ", ".join([f"{v}" for k, v in env_config_new["action_lookup"].items()])
-                action_lookup_str += f"\nYou can make up to {env_config_new['max_actions_per_traj']} actions, separated by the action separator \" " + self.action_sep + " \"\n"
+                action_lookup_str += f"\nYou can make up to {env_config_new.get('max_actions_per_traj', 5)} actions, separated by the action separator \" " + self.action_sep + " \"\n"
                 env_instruction += action_lookup_str
             prefixes[env_tag] = env_instruction
             env_config_lookup[env_tag] = {'max_tokens': env_config.get("max_tokens", self.config.actor_rollout_ref.rollout.response_length)}
@@ -213,6 +219,7 @@ class ContextManager:
         messages_list = [] # for api calling
         all_multi_modal_data = []  # Store image data for each env_output
         all_multi_modal_inputs = []  # Store processed multi-modal inputs
+        debug_raw_prompts = []  # Store final prompt text (after vision token replacement) for debugging
         
         for env_output in env_outputs:
             env_id = env_output['env_id']
@@ -226,7 +233,7 @@ class ContextManager:
 
             # Collect images from the state if any
             multi_modal_data = {"image": [], "video": []}
-            
+
             for idx, content in enumerate(env_output["history"]):
                 if "NoThink" not in env_tag and "NoAction" not in env_tag:
                     messages[-1]["content"] += f"\nTurn {idx + 1}:\n"
@@ -236,10 +243,24 @@ class ContextManager:
                     
                     state_content = content['state']
                     
-                    # Check if state contains image data (RGB array or <image> token)
+                    # Check if state contains image data (RGB array, PIL images, or <image> token)
                     if self.processor is not None:
-                        # Check for direct RGB image array in content
-                        if 'image' in content and content['image'] is not None:
+                        # Check for images from es_manager (PIL Images list)
+                        if 'images' in content and content['images'] is not None:
+                            # Images from es_manager - already PIL Images
+                            num_images = len(content['images'])
+                            print(f"🖼️  ContextManager: Found {num_images} images in env {env_output['env_id']} turn {idx}")
+                            for pil_image in content['images']:
+                                multi_modal_data["image"].append(pil_image)
+                            # For Qwen2.5-VL, use proper image token format
+                            # Remove existing tokens and add CORRECT NUMBER of <image> tokens
+                            state_text = state_content.replace('<image>', '').replace('<images>', '').strip()
+                            # Add exactly the right number of <image> tokens for VLLM
+                            image_tokens = "<image> " * num_images
+                            state_text = image_tokens.strip() + (" " + state_text if state_text else "")
+                            print(f"🔧 ContextManager: Generated {num_images} <image> tokens: '{image_tokens.strip()}'")
+                        # Check for direct RGB image array in content (backward compatibility)
+                        elif 'image' in content and content['image'] is not None:
                             # Image passed as RGB array or PIL Image
                             image_data = content['image']
                             if hasattr(image_data, 'shape'):  # numpy array
@@ -254,13 +275,12 @@ class ContextManager:
                                 image = image_data
                             
                             multi_modal_data["image"].append(image)
+                            # For Qwen2.5-VL, use proper image token format
                             state_text = state_content.replace('<image>', '').strip() if '<image>' in state_content else state_content
-                            if state_text:
-                                state_text += " <image>"  # Ensure image token is present
-                            else:
-                                state_text = "<image>"
-                        elif '<image>' in state_content:
-                            # State contains <image> token but no actual image data
+                            # Add exactly one <image> token for single image
+                            state_text = "<image>" + (" " + state_text if state_text else "")
+                        elif '<image>' in state_content or '<images>' in state_content:
+                            # State contains image token but no actual image data
                             state_text = state_content
                         else:
                             state_text = state_content
@@ -273,6 +293,10 @@ class ContextManager:
                         messages[-1]["content"] += f"Question:\n{state_text}\n"
                     else:
                         messages[-1]["content"] += f"State:\n{state_text}\nYou have {content['actions_left']} actions left. Always output: {FORMAT_PROMPT} with no extra text. Strictly follow this format. {LENGTH_PROMPT}\n"
+                    
+                    # Debug log to see what's being added to messages
+                    if self.processor is not None and '<image>' in state_text:
+                        print(f"🔍 ContextManager: Added state with <image> token: '{state_text}'")
                 if "llm_response" in content:
                     messages.append({"role": "assistant", "content": content["llm_response"]})
                 if "reward" in content and not (prepare_for_update and idx == len(env_output["history"]) - 1):
@@ -287,6 +311,12 @@ class ContextManager:
             if self.processor is not None and len(multi_modal_data["image"]) > 0:
                 # Use processor for multimodal input
                 raw_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=(not prepare_for_update), tokenize=False)
+                # Replace <image> placeholder with vision tokens expected by Qwen-VL
+                vision_placeholder = "<|vision_start|><|image_pad|><|vision_end|>"
+                raw_prompt = raw_prompt.replace("<image>", vision_placeholder)
+                print(f"🔍 ContextManager: Generated raw_prompt with {len(multi_modal_data['image'])} images (vision placeholders inserted)")
+                print(f"🔍 Vision placeholders count: {raw_prompt.count(vision_placeholder)}")
+                
                 if not prepare_for_update:
                     if "NoThink" not in env_tag:
                         if self.config.agent_proxy.enable_think:
@@ -294,8 +324,14 @@ class ContextManager:
                         else:
                             raw_prompt += "<answer>" # force the LLM to answer
                 
+                # Store prompt text for later debugging
                 llm_input_texts.append(raw_prompt)
+                debug_raw_prompts.append(raw_prompt)  # keep full prompt with <|vision_start|> tokens
                 all_multi_modal_data.append(multi_modal_data)
+                
+                # Save raw prompt token ids so that we can feed vLLM without losing placeholders
+                raw_prompt_ids = self.tokenizer.encode(raw_prompt, add_special_tokens=False)
+                all_multi_modal_inputs.append({"raw_prompt_ids": raw_prompt_ids})
                 
                 # Process multimodal inputs
                 images = multi_modal_data["image"] if multi_modal_data["image"] else None
@@ -308,14 +344,15 @@ class ContextManager:
                 all_multi_modal_inputs.append(multi_modal_inputs)
             else:
                 # Use tokenizer for text-only input
-                text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=(not prepare_for_update), tokenize=False)
-                if not prepare_for_update:
-                    if "NoThink" not in env_tag:
-                        if self.config.agent_proxy.enable_think:
-                            text += "<think>" # force the LLM to think before answering
-                        else:
-                            text += "<answer>" # force the LLM to answer
-                llm_input_texts.append(text)
+            text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=(not prepare_for_update), tokenize=False)
+            if not prepare_for_update:
+                if "NoThink" not in env_tag:
+                    if self.config.agent_proxy.enable_think:
+                        text += "<think>" # force the LLM to think before answering
+                    else:
+                        text += "<answer>" # force the LLM to answer
+            llm_input_texts.append(text)
+                debug_raw_prompts.append(text)  # text-only prompt
                 all_multi_modal_data.append({})
                 all_multi_modal_inputs.append({})
             
@@ -348,12 +385,19 @@ class ContextManager:
             "env_ids": np.array([env_output["env_id"] for env_output in env_outputs], dtype=object),
             "group_ids": np.array([env_output["group_id"] for env_output in env_outputs], dtype=object),
             "messages_list": np.array(messages_list, dtype=object),
+            "debug_raw_prompts": np.array(debug_raw_prompts, dtype=object),
         }
         
         # Add multimodal data if any environment has images
-        if any(len(mmd.get("image", [])) > 0 for mmd in all_multi_modal_data):
+        has_any_images = any(len(mmd.get("image", [])) > 0 for mmd in all_multi_modal_data)
+        if has_any_images:
+            total_images = sum(len(mmd.get("image", [])) for mmd in all_multi_modal_data)
+            print(f"🖼️  ContextManager: Found {total_images} images across {len(env_outputs)} environments")
+            print(f"🔍 ContextManager: Image counts per env: {[len(mmd.get('image', [])) for mmd in all_multi_modal_data]}")
             llm_inputs.non_tensor_batch["multi_modal_data"] = np.array(all_multi_modal_data, dtype=object)
             llm_inputs.non_tensor_batch["multi_modal_inputs"] = np.array(all_multi_modal_inputs, dtype=object)
+        else:
+            print(f"📝 ContextManager: No images found across {len(env_outputs)} environments")
 
         if prepare_for_update:
             metrics = {}
@@ -409,7 +453,6 @@ class ContextManager:
 def main(config):
     import json
     tokenizer = AutoTokenizer.from_pretrained(config.actor_rollout_ref.model.path)
-    processor = AutoProcessor.from_pretrained(config.actor_rollout_ref.model.path)
 
     ctx_manager = ContextManager(config=config, tokenizer=tokenizer)
     print(f"============= ctx_manager prefix =============\n {ctx_manager.prefix_lookup}")

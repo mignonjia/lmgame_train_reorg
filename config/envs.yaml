@@ -11,6 +11,7 @@ custom_envs:
       dim_y: 6
       num_boxes: 1
       max_steps: 100
+      render_mode: "rgb_array"  # Enable vision support
  
   GSM8K_NoThink:
     env_type: gsm8k

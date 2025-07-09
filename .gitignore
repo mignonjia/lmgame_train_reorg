@@ -126,3 +126,8 @@ tests/e2e/toy_examples/deepspeed/synchronous/output.txt
 log/
 
 env_setup.sh
+
+outputs/
+test_logs/
+
+run_logs/

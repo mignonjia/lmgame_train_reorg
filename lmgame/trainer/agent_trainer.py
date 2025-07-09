@@ -74,10 +74,12 @@ class RayAgentTrainer(VerlRayPPOTrainer):
         # self.val_seeds = [seed for seed in range(val_start, val_start + self.config.trainer.validation_steps)]
 
     def init_agent_proxy(self):
+        # Support for multi-modal training: pass processor to enable vision capabilities
         self.agent_proxy = LLMAgentProxy(
             config=self.config,
             actor_rollout_wg=self.actor_rollout_wg,
-            tokenizer=self.tokenizer
+            tokenizer=self.tokenizer,
+            processor=self.processor  # Enable multimodal processing for training rollouts
         )
 
     def _validate(self):

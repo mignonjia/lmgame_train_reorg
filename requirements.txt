@@ -6,14 +6,14 @@ accelerate
 codetiming
 datasets
 dill
-flash-attn
+flash-attn==2.8.0.post2
 hydra-core
 pandas
 pybind11
 ray>=2.10
 tensordict==0.6.2
 transformers
-vllm==0.8.2
+vllm>=0.8.5
 wandb
 gymnasium[toy-text]
 pyarrow>=15.0.0
