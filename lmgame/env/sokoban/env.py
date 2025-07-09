@@ -84,7 +84,7 @@ class SokobanEnvActor:
             obs, reward, done, info = self.env.step(action)
             total_reward += reward
             executed_actions.append(action)
-            if done: # result[2] is done
+            if done:
                 break
         return obs, total_reward, done, info, executed_actions
 

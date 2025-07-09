@@ -15,7 +15,7 @@ class GSM8KEnv(BaseLanguageBasedEnv):
         super(GSM8KEnv, self).__init__()
         
         self.config = config
-        self.dataset = load_dataset(self.config.dataset_path, 'main', split=self.config.split)
+        self.dataset = load_dataset('openai/gsm8k', 'main', split=self.config.split)
         self.current_sample = None
         self.current_unique_id = None
         self.current_question = None
@@ -93,15 +93,19 @@ class GSM8KEnvActor:
         return self.env.reset(seed)
 
     def step(self, actions):
-        total_reward, info, done, executed_actions = 0, {}, False, []
+        obs = self.env.render()
+        total_reward = 0
+        info = {'action_is_valid': False, 'action_is_effective': False, 'success': False}
+        done = False
+        executed_actions = []
         for action in actions:
-            _, reward, done, info = self.env.step(action)
+            obs, reward, done, info = self.env.step(action)
             total_reward += reward
             executed_actions.append(action)
-            if done: # result[2] is done
+            if done:
                 break
-        return total_reward, info, done, executed_actions
-
+        return obs, total_reward, done, info, executed_actions
+    
     def render(self, mode=None):
         return self.env.render(mode)
 

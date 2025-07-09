@@ -25,7 +25,6 @@ custom_envs:
     env_config: 
       max_steps: 5
       split: "train"
-      dataset_path: "openai/gsm8k"
 
   GSM8K_NoThink_Turn_5:
     env_type: gsm8k
@@ -36,7 +35,6 @@ custom_envs:
     env_config: 
       max_steps: 5
       split: "train"
-      dataset_path: "openai/gsm8k"
 
   GSM8K:
     env_type: gsm8k
@@ -47,7 +45,6 @@ custom_envs:
     env_config: 
       max_steps: 5
       split: "train"
-      dataset_path: "openai/gsm8k"
 
   GSM8K_Turn_5:
     env_type: gsm8k
@@ -58,7 +55,6 @@ custom_envs:
     env_config: 
       max_steps: 5
       split: "train"
-      dataset_path: "openai/gsm8k"
 
   Blocksworld3_Sparse:
     env_type: blocksworld
