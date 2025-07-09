@@ -249,16 +249,17 @@ class ContextManager:
                         if 'images' in content and content['images'] is not None:
                             # Images from es_manager - already PIL Images
                             num_images = len(content['images'])
-                            print(f"🖼️  ContextManager: Found {num_images} images in env {env_output['env_id']} turn {idx}")
+                            # print(f"🖼️  ContextManager: Found {num_images} images in env {env_output['env_id']} turn {idx}")
                             for pil_image in content['images']:
                                 multi_modal_data["image"].append(pil_image)
-                            # For Qwen2.5-VL, use proper image token format
-                            # Remove existing tokens and add CORRECT NUMBER of <image> tokens
+                            # CRITICAL FIX: Add exactly ONE <image> token per image (not multiple)
+                            # Remove existing tokens and add correct number of single <image> tokens
                             state_text = state_content.replace('<image>', '').replace('<images>', '').strip()
-                            # Add exactly the right number of <image> tokens for VLLM
-                            image_tokens = "<image> " * num_images
-                            state_text = image_tokens.strip() + (" " + state_text if state_text else "")
-                            print(f"🔧 ContextManager: Generated {num_images} <image> tokens: '{image_tokens.strip()}'")
+                            # Add exactly one <image> token per image for vLLM processing
+                            if num_images > 0:
+                                image_tokens = " ".join(["<image>"] * num_images)
+                                state_text = image_tokens + (" " + state_text if state_text else "")
+                            # print(f"🔧 ContextManager: Generated {num_images} <image> tokens: '{image_tokens}'")
                         # Check for direct RGB image array in content (backward compatibility)
                         elif 'image' in content and content['image'] is not None:
                             # Image passed as RGB array or PIL Image
@@ -296,7 +297,7 @@ class ContextManager:
                     
                     # Debug log to see what's being added to messages
                     if self.processor is not None and '<image>' in state_text:
-                        print(f"🔍 ContextManager: Added state with <image> token: '{state_text}'")
+                        pass  # print(f"🔍 ContextManager: Added state with <image> token: '{state_text}'")
                 if "llm_response" in content:
                     messages.append({"role": "assistant", "content": content["llm_response"]})
                 if "reward" in content and not (prepare_for_update and idx == len(env_output["history"]) - 1):
@@ -311,11 +312,11 @@ class ContextManager:
             if self.processor is not None and len(multi_modal_data["image"]) > 0:
                 # Use processor for multimodal input
                 raw_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=(not prepare_for_update), tokenize=False)
-                # Replace <image> placeholder with vision tokens expected by Qwen-VL
+                
+                # CRITICAL FIX: Replace <image> tokens with vLLM's expected 3-token placeholder sequence
+                # This ensures the placeholder count matches the actual image tensor count
                 vision_placeholder = "<|vision_start|><|image_pad|><|vision_end|>"
                 raw_prompt = raw_prompt.replace("<image>", vision_placeholder)
-                print(f"🔍 ContextManager: Generated raw_prompt with {len(multi_modal_data['image'])} images (vision placeholders inserted)")
-                print(f"🔍 Vision placeholders count: {raw_prompt.count(vision_placeholder)}")
                 
                 if not prepare_for_update:
                     if "NoThink" not in env_tag:
@@ -329,10 +330,6 @@ class ContextManager:
                 debug_raw_prompts.append(raw_prompt)  # keep full prompt with <|vision_start|> tokens
                 all_multi_modal_data.append(multi_modal_data)
                 
-                # Save raw prompt token ids so that we can feed vLLM without losing placeholders
-                raw_prompt_ids = self.tokenizer.encode(raw_prompt, add_special_tokens=False)
-                all_multi_modal_inputs.append({"raw_prompt_ids": raw_prompt_ids})
-                
                 # Process multimodal inputs
                 images = multi_modal_data["image"] if multi_modal_data["image"] else None
                 videos = multi_modal_data["video"] if multi_modal_data["video"] else None
@@ -341,17 +338,18 @@ class ContextManager:
                 
                 # Remove input_ids and attention_mask as they'll be processed separately
                 multi_modal_inputs = {k: v for k, v in model_inputs.items() if k not in ["input_ids", "attention_mask"]}
+                # Note: Do not store raw_prompt_ids here because multi_modal_inputs must contain only tensors for torch.cat
                 all_multi_modal_inputs.append(multi_modal_inputs)
             else:
                 # Use tokenizer for text-only input
-            text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=(not prepare_for_update), tokenize=False)
-            if not prepare_for_update:
-                if "NoThink" not in env_tag:
-                    if self.config.agent_proxy.enable_think:
-                        text += "<think>" # force the LLM to think before answering
-                    else:
-                        text += "<answer>" # force the LLM to answer
-            llm_input_texts.append(text)
+                text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=(not prepare_for_update), tokenize=False)
+                if not prepare_for_update:
+                    if "NoThink" not in env_tag:
+                        if self.config.agent_proxy.enable_think:
+                            text += "<think>" # force the LLM to think before answering
+                        else:
+                            text += "<answer>" # force the LLM to answer
+                llm_input_texts.append(text)
                 debug_raw_prompts.append(text)  # text-only prompt
                 all_multi_modal_data.append({})
                 all_multi_modal_inputs.append({})
@@ -388,16 +386,21 @@ class ContextManager:
             "debug_raw_prompts": np.array(debug_raw_prompts, dtype=object),
         }
         
-        # Add multimodal data if any environment has images
+        # Always add multimodal arrays to ensure consistent structure for VERL
+        # This prevents batch size mismatch errors during distributed training
+        assert len(all_multi_modal_data) == len(env_outputs), f"Multi_modal_data length {len(all_multi_modal_data)} != env_outputs length {len(env_outputs)}"
+        assert len(all_multi_modal_inputs) == len(env_outputs), f"Multi_modal_inputs length {len(all_multi_modal_inputs)} != env_outputs length {len(env_outputs)}"
+        
+        # Check if we have any actual images
         has_any_images = any(len(mmd.get("image", [])) > 0 for mmd in all_multi_modal_data)
         if has_any_images:
             total_images = sum(len(mmd.get("image", [])) for mmd in all_multi_modal_data)
-            print(f"🖼️  ContextManager: Found {total_images} images across {len(env_outputs)} environments")
-            print(f"🔍 ContextManager: Image counts per env: {[len(mmd.get('image', [])) for mmd in all_multi_modal_data]}")
-            llm_inputs.non_tensor_batch["multi_modal_data"] = np.array(all_multi_modal_data, dtype=object)
-            llm_inputs.non_tensor_batch["multi_modal_inputs"] = np.array(all_multi_modal_inputs, dtype=object)
-        else:
-            print(f"📝 ContextManager: No images found across {len(env_outputs)} environments")
+            # print(f"🖼️  ContextManager: Found {total_images} images across {len(env_outputs)} environments")
+        
+        # Always add multimodal arrays regardless of whether images exist
+        # This ensures VERL's chunking mechanism works correctly
+        llm_inputs.non_tensor_batch["multi_modal_data"] = np.array(all_multi_modal_data, dtype=object)
+        llm_inputs.non_tensor_batch["multi_modal_inputs"] = np.array(all_multi_modal_inputs, dtype=object)
 
         if prepare_for_update:
             metrics = {}

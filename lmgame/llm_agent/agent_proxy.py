@@ -32,7 +32,7 @@ class VllmWrapperWg: # Thi is a developing class for eval and test
             enable_chunked_prefill=ro_config.enable_chunked_prefill,
             enable_prefix_caching=True,
 		)
-		print("LLM initialized")
+		# print("LLM initialized")
 		self.sampling_params = SamplingParams(
 			max_tokens=ro_config.response_length,
 			temperature=ro_config.val_kwargs.temperature,
@@ -105,9 +105,9 @@ class LLMAgentProxy:
 		for cur_turn in range(self.config.agent_proxy.max_turn):
 			lm_inputs: DataProto = ctx_manager.get_lm_inputs(env_outputs, prepare_for_update=False)
 			lm_inputs.meta_info = dataproto.meta_info # TODO: setup vllm early stop when max length is reached. make sure this can be done
-			print(f"==============================================[DEBUG] lm_inputs ================================================")
-			print(f"{lm_inputs}")
-			print(f"==============================================[DEBUG] lm_inputs ================================================")
+			# print(f"==============================================[DEBUG] lm_inputs ================================================")
+			# print(f"{lm_inputs}")
+			# print(f"==============================================[DEBUG] lm_inputs ================================================")
 			lm_outputs: DataProto = self.generate_sequences(lm_inputs)
 			
 			# lm_inputs.save_to_disk("lm_inputs.pkl")
@@ -137,15 +137,15 @@ def main(config):
 	start_time = time.time()
 	rollouts = proxy.rollout(DataProto(batch=None, non_tensor_batch=None, meta_info={'eos_token_id': 151645, 'pad_token_id': 151643, 'recompute_log_prob': False, 'do_sample':config.actor_rollout_ref.rollout.do_sample, 'validate': True}), val=True)
 	end_time = time.time()
-	print(f'rollout time: {end_time - start_time} seconds')
+	# print(f'rollout time: {end_time - start_time} seconds')
 	# print rollout rewards from the rm_scores
 	rm_scores = rollouts.batch["rm_scores"]
 	metrics = rollouts.meta_info["metrics"]
 	avg_reward = rm_scores.sum(-1).mean().item()
-	print(f'rollout rewards: {avg_reward}')
-	print(f'metrics:')
+	# print(f'rollout rewards: {avg_reward}')
+	# print(f'metrics:')
 	for k, v in metrics.items():
-		print(f'{k}: {v}')
+		pass  # print(f'{k}: {v}')
 
 # @hydra.main(version_base=None, config_path="../../config", config_name="evaluate_api_llm")
 # def main(config):

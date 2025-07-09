@@ -270,14 +270,14 @@ def main(config):
     Unit test for EnvStateManager
     """
     es_manager = EnvStateManager(config, mode="train")
-    print("Initializing environments...")
+    # print("Initializing environments...")
     es_manager.reset(seed=123)
 
     renders = es_manager.render()
     for i, render in enumerate(renders[:4]):  # Show first 2 environments
-        print(f"Environment {i}:\n{render}\n")
+        pass  # print(f"Environment {i}:\n{render}\n")
     
-    print("\nRunning step for training environments...")
+    # print("\nRunning step for training environments...")
     all_env_inputs = [
         {
             "env_id": 0,
@@ -292,13 +292,13 @@ def main(config):
             "actions": ["down"]
         }
     ]
-    env_outputs = es_manager.step(all_env_inputs)
-    print(f"Active environments after step: {len(env_outputs)}")
-    print(f"env_outputs[:2]: {env_outputs[:2]}")
+    env_outputs = es_manager.step(all_env_inputs, cur_turn=0)
+    # print(f"Active environments after step: {len(env_outputs)}")
+    # print(f"env_outputs[:2]: {env_outputs[:2]}")
     
     renders = es_manager.render()
     for i, render in enumerate(renders[:4]):  # Show first 2 environments
-        print(f"Environment {i}:\n{render}\n")
+        pass  # print(f"Environment {i}:\n{render}\n")
 
     all_env_inputs = [
         {
@@ -314,21 +314,21 @@ def main(config):
             "actions": ["up", "up", "up", "up", "up"]
         }
     ]
-    env_outputs = es_manager.step(all_env_inputs)
-    print(f"Active environments after step: {len(env_outputs)}")
-    print(f"env_outputs[:2]: {env_outputs[:2]}")
+    env_outputs = es_manager.step(all_env_inputs, cur_turn=1)
+    # print(f"Active environments after step: {len(env_outputs)}")
+    # print(f"env_outputs[:2]: {env_outputs[:2]}")
     
     renders = es_manager.render()
     for i, render in enumerate(renders[:4]):  # Show first 2 environments
-        print(f"Environment {i}:\n{render}\n")
+        pass  # print(f"Environment {i}:\n{render}\n")
     
-    print("\nRendering final output...")
+    # print("\nRendering final output...")
     final_outputs = es_manager.get_rollout_states()
-    print(f"final outputs[:4]: {final_outputs[:4]}")
+    # print(f"final outputs[:4]: {final_outputs[:4]}")
     
-    print("\nClosing environments...")
+    # print("\nClosing environments...")
     es_manager.close()
-    print("Test completed successfully!")
+    # print("Test completed successfully!")
 
 
 if __name__ == "__main__":

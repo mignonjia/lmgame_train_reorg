@@ -12,7 +12,7 @@ pandas
 pybind11
 ray>=2.10
 tensordict==0.6.2
-transformers
+transformers>=4.53.0
 vllm>=0.8.5
 wandb
 gymnasium[toy-text]

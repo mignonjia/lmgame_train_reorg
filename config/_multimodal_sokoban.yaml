@@ -4,7 +4,7 @@ defaults:
 
 # Support for multi-modal training: Override configurations for vision-based training
 
-# Use the same vision model for both actor and critic (standard PPO approach)
+# Use vision model for actor, text model for critic (following VERL pattern)
 model_path: Qwen/Qwen2.5-VL-3B-Instruct
 
 # Smaller batch sizes for vision models to manage GPU memory
@@ -13,47 +13,86 @@ ppo_mini_batch_size: 4
 
 actor_rollout_ref:
   model:
-    # Support for multi-modal training: Use vision model
+    # Support for multi-modal training: Use vision model for actor
+    path: Qwen/Qwen2.5-VL-3B-Instruct
     trust_remote_code: True
+    use_remove_padding: True
+    enable_gradient_checkpointing: True
+  actor:
+    # Following VERL pattern for vision training
+    optim:
+      lr: 1e-6
+    use_kl_loss: True
+    kl_loss_coef: 0.01
+    kl_loss_type: low_var_kl
+    fsdp_config:
+      param_offload: False
+      optimizer_offload: False
+    use_invalid_action_penalty: True
+    invalid_action_penalty_coef: 0.1
+  ref:
+    fsdp_config:
+      param_offload: True
+    log_prob_micro_batch_size_per_gpu: 16
   rollout:
-    # Support for multi-modal training: Vision-optimized vLLM settings
-    gpu_memory_utilization: 0.8
-    max_model_len: 4096
+    # Support for multi-modal training: Use same memory settings as base.yaml
+    gpu_memory_utilization: 0.5
+    max_model_len: 20000
     trust_remote_code: True
     disable_mm_preprocessor_cache: True
     enable_chunked_prefill: False
+    enforce_eager: True
+    free_cache_engine: True
     enable_prefix_caching: False
     limit_mm_per_prompt: {"image": 3, "video": 0}
-    # Smaller batches for vision models
-    max_num_batched_tokens: 2048
-    max_num_seqs: 256
+    # Use same batch settings as base.yaml
+    max_num_batched_tokens: 20000
+    log_prob_micro_batch_size_per_gpu: 4
+    tensor_model_parallel_size: 1
+    rollout_filter_ratio: 1.0  # Disable rollout filtering when env_groups is small
+    val_kwargs:
+      do_sample: False
+      temperature: 0
 
-# Support for multi-modal training: Critic will use the same model with auto-added value head
+# Support for multi-modal training: Use text-only model for critic (CRITICAL FIX)
 critic:
   model:
+    path: Qwen/Qwen2.5-3B-Instruct  # Text-only model for critic
     trust_remote_code: True
+
+# Algorithm settings following VERL pattern
+algorithm:
+  adv_estimator: gae  # Could also try gigpo
+  use_kl_in_reward: False
+  gamma: 0.95
 
 # Support for multi-modal training: Environment configuration for vision input
 es_manager:
   train:
     env_groups: 1
     group_size: 4  # Smaller groups for vision training
+    env_configs:
+      tags: ["SimpleSokoban"]
+      n_groups: [1]  # Must sum to env_groups (1)
   val:
     env_groups: 16
     group_size: 1
+    env_configs:
+      tags: ["SimpleSokoban"] 
+      n_groups: [16]  # Must sum to env_groups (16)
 
 custom_envs:
   SimpleSokoban:
     env_type: "sokoban"
-    max_actions_per_traj: 8  # Slightly reduced for vision training
+    max_actions_per_traj: 10  # Same as standard envs.yaml
     env_instruction: "You are solving the Sokoban puzzle. You are the player and you need to push all boxes to targets. When you are right next to a box, you can push it by moving in the same direction. You cannot push a box through a wall, and you cannot pull a box. The answer should be a sequence of actions, like <answer>Right || Right || Up</answer>."
-    max_tokens: 128
+    max_tokens: 100  # Same as standard envs.yaml
     max_turn: 5
     env_config:
-      dim_x: 5  # Slightly smaller for vision training
-      dim_y: 5
+      dim_x: 6  # Same as standard envs.yaml
+      dim_y: 6  # Same as standard envs.yaml
       num_boxes: 1
-      max_steps: 50
+      max_steps: 100  # Same as standard envs.yaml
       # Support for multi-modal training: Use rgb_array for vision input
       render_mode: "rgb_array"
 
@@ -64,4 +103,8 @@ trainer:
   total_training_steps: 100
   validation_steps: 1
   val_before_train: True
-  test_freq: 20  # More frequent validation for vision training 
+  test_freq: 20  # More frequent validation for vision training
+  critic_warmup: 0
+  n_gpus_per_node: 1
+  save_freq: -1 
+  balance_batch: False  # Disable balancing to avoid zero-size batch crash 
