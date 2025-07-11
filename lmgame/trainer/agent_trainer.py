@@ -12,7 +12,7 @@ from pprint import pprint
 from typing import Type, Dict
 from copy import deepcopy
 from tqdm import tqdm
-
+from datetime import datetime
 import ray
 import numpy as np
 from omegaconf import OmegaConf, open_dict
@@ -33,7 +33,6 @@ import torch
 from verl.utils.torch_functional import masked_mean
 
 from lmgame.llm_agent.agent_proxy import LLMAgentProxy
-from lmgame.utils import GenerationsLogger
 
 
 class RayAgentTrainer(VerlRayPPOTrainer):
@@ -54,24 +53,26 @@ class RayAgentTrainer(VerlRayPPOTrainer):
                  val_reward_fn=None):
 
         super().__init__(config, tokenizer, role_worker_mapping, resource_pool_manager, ray_worker_group_cls, processor=processor, reward_fn=reward_fn, val_reward_fn=val_reward_fn)
-        # do not use the original val logger, but use this here
-        self.generations_logger = GenerationsLogger()
         
         
     def _create_dataloader(self, train_dataset, val_dataset, collate_fn, train_sampler):
+        # lmgame: remove train dataloader and val dataloader in verl, only set total_training_steps
+
         assert self.config.trainer.total_training_steps is not None, "must determine total training steps"
         total_training_steps = self.config.trainer.total_training_steps
 
         self.total_training_steps = total_training_steps
         print(f'Total training steps: {self.total_training_steps}')
 
-        OmegaConf.set_struct(self.config, True)
-        with open_dict(self.config):
-            self.config.actor_rollout_ref.actor.optim.total_training_steps = total_training_steps
-            self.config.critic.optim.total_training_steps = total_training_steps
-        # val_start = 100000
-        # self.train_seeds = [seed for seed in range(0, self.config.trainer.total_training_steps * 1000, 1000)]
-        # self.val_seeds = [seed for seed in range(val_start, val_start + self.config.trainer.validation_steps)]
+        try:
+            OmegaConf.set_struct(self.config, True)
+            with open_dict(self.config):
+                if OmegaConf.select(self.config, "actor_rollout_ref.actor.optim"):
+                    self.config.actor_rollout_ref.actor.optim.total_training_steps = total_training_steps
+                if OmegaConf.select(self.config, "critic.optim"):
+                    self.config.critic.optim.total_training_steps = total_training_steps
+        except Exception as e:
+            print(f"Warning: Could not set total_training_steps in config. Structure missing? Error: {e}")
 
     def init_agent_proxy(self):
         self.agent_proxy = LLMAgentProxy(
@@ -132,7 +133,7 @@ class RayAgentTrainer(VerlRayPPOTrainer):
             reward_tensor_lst.append(reward_tensor)
             data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * reward_tensor.shape[0]))
 
-        self._maybe_log_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores, _type='val')
+        self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
 
         reward_tensor_lst = [i.sum(-1).cpu() for i in reward_tensor_lst]
         reward_tensor = torch.cat(reward_tensor_lst) # (batch_size,)
@@ -152,43 +153,23 @@ class RayAgentTrainer(VerlRayPPOTrainer):
 
         return metric_dict
 
-    def _maybe_log_generations(self, inputs, outputs, scores, _type='val'):
-        """Log a table of validation samples to the configured logger (wandb or swanlab)"""
-
-        generations_to_log = self.config.trainer.generations_to_log_to_wandb[_type]
-
-        if generations_to_log == 0:
-            return
-
-        import numpy as np
-
-        # Create tuples of (input, output, score) and sort by input text
-        samples = list(zip(inputs, outputs, scores))
-        samples.sort(key=lambda x: x[0])  # Sort by input text
-
-        # Use fixed random seed for deterministic shuffling
-        rng = np.random.RandomState(42)
-        rng.shuffle(samples)
-
-        # Take first N samples after shuffling
-        samples = samples[:generations_to_log]
-
-        # Log to each configured logger
-        self.generations_logger.log(self.config.trainer.logger, samples, self.global_steps, _type)
-
     def fit(self):
         """
         The training loop of PPO.
-        The driver process only need to call the compute functions of the worker group through RPC to construct the PPO dataflow.
+        The driver process only need to call the compute functions of the worker group through RPC
+        to construct the PPO dataflow.
         The light-weight advantage computation is done on the driver process.
         """
-        from verl.utils.tracking import Tracking
         from omegaconf import OmegaConf
 
-        logger = Tracking(project_name=self.config.trainer.project_name,
-                          experiment_name=self.config.trainer.experiment_name,
-                          default_backend=self.config.trainer.logger,
-                          config=OmegaConf.to_container(self.config, resolve=True))
+        from verl.utils.tracking import Tracking
+
+        logger = Tracking(
+            project_name=self.config.trainer.project_name,
+            experiment_name=self.config.trainer.experiment_name,
+            default_backend=self.config.trainer.logger,
+            config=OmegaConf.to_container(self.config, resolve=True),
+        )
 
         self.global_steps = 0
 
@@ -197,11 +178,12 @@ class RayAgentTrainer(VerlRayPPOTrainer):
 
         # perform validation before training
         # currently, we only support validation using the reward_function.
-        if self.val_reward_fn is not None and self.config.trainer.get('val_before_train', True):
+        if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True):
             val_metrics = self._validate()
-            pprint(f'Initial validation metrics: {val_metrics}')
+            assert val_metrics, f"{val_metrics=}"
+            pprint(f"Initial validation metrics: {val_metrics}")
             logger.log(data=val_metrics, step=self.global_steps)
-            if self.config.trainer.get('val_only', False):
+            if self.config.trainer.get("val_only", False):
                 return
 
         # add tqdm
@@ -210,13 +192,7 @@ class RayAgentTrainer(VerlRayPPOTrainer):
         # we start from step 1
         self.global_steps += 1
         last_val_metrics = None
-
-        def _process_batch_for_logging(batch):
-            inputs = batch.batch['input_ids']
-            inputs = [self.tokenizer.decode(input_ids, skip_special_tokens=True) for input_ids in inputs]
-            outputs = [""] * len(inputs)
-            scores = batch.batch['rm_scores'].sum(-1).cpu().tolist()
-            return inputs, outputs, scores
+        self.max_steps_duration = 0
 
         def _filter_rollout(batch):
             """filter rollout based on in-group max - in-group mean. We want those groups to have high-quality rollouts that deviates significantly from the mean"""
@@ -262,7 +238,6 @@ class RayAgentTrainer(VerlRayPPOTrainer):
             return batch, metrics
 
 
-        self.start_time = time.time()
         for step in range(self.total_training_steps):
             # metrics = {}
             timing_raw = {}
@@ -278,9 +253,6 @@ class RayAgentTrainer(VerlRayPPOTrainer):
                     # print("batch: ", batch)
                     batch, metrics = _filter_rollout(batch)
                     metrics.update({"train/" + key: value for key, value in batch.meta_info['metrics'].items()})
-
-                    inputs, outputs, scores = _process_batch_for_logging(batch)
-                    # self._maybe_log_generations(inputs=inputs, outputs=outputs, scores=scores, _type='train')
 
                 # batch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))],
                                                             # dtype=object)
@@ -425,45 +397,30 @@ class RayAgentTrainer(VerlRayPPOTrainer):
             self.global_steps += 1
 
     def _save_checkpoint(self):
-        """ 
-        Different from VerlRayPPOTrainer, we have no dataloader so we won't save it. Other logic is the same.
-        """
+        from verl.utils.fs import local_mkdir_safe
+
         # path: given_path + `/global_step_{global_steps}` + `/actor`
-        local_global_step_folder = os.path.join(self.config.trainer.default_local_dir,
-                                                f'global_step_{self.global_steps}')
+        local_global_step_folder = os.path.join(self.config.trainer.default_local_dir, f"global_step_{self.global_steps}")
 
-        print(f'local_global_step_folder: {local_global_step_folder}')
-        actor_local_path = os.path.join(local_global_step_folder, 'actor')
+        print(f"local_global_step_folder: {local_global_step_folder}")
+        actor_local_path = os.path.join(local_global_step_folder, "actor")
 
-        actor_remote_path = None if self.config.trainer.default_hdfs_dir is None else os.path.join(
-            self.config.trainer.default_hdfs_dir, f'global_step_{self.global_steps}', 'actor')
+        actor_remote_path = None if self.config.trainer.default_hdfs_dir is None else os.path.join(self.config.trainer.default_hdfs_dir, f"global_step_{self.global_steps}", "actor")
 
-        remove_previous_ckpt_in_save = self.config.trainer.get('remove_previous_ckpt_in_save', False)
+        remove_previous_ckpt_in_save = self.config.trainer.get("remove_previous_ckpt_in_save", False)
         if remove_previous_ckpt_in_save:
-            print(
-                'Warning: remove_previous_ckpt_in_save is deprecated, set max_actor_ckpt_to_keep=1 and max_critic_ckpt_to_keep=1 instead'
-            )
-        max_actor_ckpt_to_keep = self.config.trainer.get('max_actor_ckpt_to_keep',
-                                                         None) if not remove_previous_ckpt_in_save else 1
-        max_critic_ckpt_to_keep = self.config.trainer.get('max_critic_ckpt_to_keep',
-                                                          None) if not remove_previous_ckpt_in_save else 1
+            print("Warning: remove_previous_ckpt_in_save is deprecated," + " set max_actor_ckpt_to_keep=1 and max_critic_ckpt_to_keep=1 instead")
+        max_actor_ckpt_to_keep = self.config.trainer.get("max_actor_ckpt_to_keep", None) if not remove_previous_ckpt_in_save else 1
+        max_critic_ckpt_to_keep = self.config.trainer.get("max_critic_ckpt_to_keep", None) if not remove_previous_ckpt_in_save else 1
 
-        self.actor_rollout_wg.save_checkpoint(actor_local_path,
-                                              actor_remote_path,
-                                              self.global_steps,
-                                              max_ckpt_to_keep=max_actor_ckpt_to_keep)
+        self.actor_rollout_wg.save_checkpoint(actor_local_path, actor_remote_path, self.global_steps, max_ckpt_to_keep=max_actor_ckpt_to_keep)
 
         if self.use_critic:
-            critic_local_path = os.path.join(local_global_step_folder, 'critic')
-            critic_remote_path = None if self.config.trainer.default_hdfs_dir is None else os.path.join(
-                self.config.trainer.default_hdfs_dir, f'global_step_{self.global_steps}', 'critic')
-            self.critic_wg.save_checkpoint(critic_local_path,
-                                           critic_remote_path,
-                                           self.global_steps,
-                                           max_ckpt_to_keep=max_critic_ckpt_to_keep)
+            critic_local_path = os.path.join(local_global_step_folder, "critic")
+            critic_remote_path = None if self.config.trainer.default_hdfs_dir is None else os.path.join(self.config.trainer.default_hdfs_dir, f"global_step_{self.global_steps}", "critic")
+            self.critic_wg.save_checkpoint(critic_local_path, critic_remote_path, self.global_steps, max_ckpt_to_keep=max_critic_ckpt_to_keep)
 
         # latest checkpointed iteration tracker (for atomic usage)
-        local_latest_checkpointed_iteration = os.path.join(self.config.trainer.default_local_dir,
-                                                           'latest_checkpointed_iteration.txt')
-        with open(local_latest_checkpointed_iteration, 'w') as f:
+        local_latest_checkpointed_iteration = os.path.join(self.config.trainer.default_local_dir, "latest_checkpointed_iteration.txt")
+        with open(local_latest_checkpointed_iteration, "w") as f:
             f.write(str(self.global_steps))
