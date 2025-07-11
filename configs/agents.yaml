@@ -1,7 +1,19 @@
 # ------ Sokoban Agent & Env Configs ------
 sokobanAgent:
+  env_instruction: "You are solving the Sokoban puzzle. You are the player and you need to push all boxes to targets. When you are right next to a box, you can push it by moving in the same direction. You cannot push a box through a wall, and you cannot pull a box. The answer should be a sequence of actions, like <answer>Right || Right || Up</answer>."
+  max_tokens: 100
+  max_turn: 5
+  max_actions_per_turn: 5
 
 sokobanEnv:
+  dim_room: [6, 6]
+  num_boxes: 1
+  max_steps: 100
+  search_depth: 300
+  grid_lookup: {0: "#", 1: "_", 2: "O", 3: "√", 4: "X", 5: "P", 6: "S"}
+  grid_vocab: {"#": "wall", "_": "empty", "O": "target", "√": "box on target", "X": "box", "P": "player", "S": "player on target"}
+  action_lookup: {1: "Up", 2: "Down", 3: "Left", 4: "Right"}
+  render_mode: "text"
 
 
 #...

@@ -1,57 +1,95 @@
-class SokobanEnv:
-    """
-    Gym-style Sokoban Environment.
-    Provides standard gym interface for Sokoban game.
-    """
-    
-    def __init__(self, config):
-        """
-        Initialize environment with configuration.
-        Sets up env.config and modality.
+import gym
+from gym_sokoban.envs.sokoban_env import SokobanEnv as GymSokobanEnv
+import numpy as np
+from .utils import generate_room
+from lmgame.utils import all_seed
+import ray
+
+class SokobanEnv(GymSokobanEnv):
+    def __init__(self, config, **kwargs):
+        self.config = config
+        self.GRID_LOOKUP = self.config['grid_lookup']
+        self.ACTION_LOOKUP = self.config['action_lookup']
+        self.search_depth = self.config['search_depth']
+        self.ACTION_SPACE = gym.spaces.discrete.Discrete(4, start=1)
+        self.render_mode = self.config['render_mode']
+
+        GymSokobanEnv.__init__(
+            self,
+            dim_room=self.config['dim_room'], 
+            max_steps=self.config['max_steps'],
+            num_boxes=self.config['num_boxes'],
+            **kwargs
+        )
+
+    def reset(self, seed=None):
+        try:
+            with all_seed(seed):
+                self.room_fixed, self.room_state, self.box_mapping, action_sequence = generate_room(
+                    dim=self.dim_room,
+                    num_steps=self.num_gen_steps,
+                    num_boxes=self.num_boxes,
+                    search_depth=self.search_depth
+                )
+            self.num_env_steps, self.reward_last, self.boxes_on_target = 0, 0, 0
+            self.player_position = np.argwhere(self.room_state == 5)[0]
+            return self.render()
+        except (RuntimeError, RuntimeWarning) as e:
+            next_seed = abs(hash(str(seed))) % (2 ** 32) if seed is not None else None
+            return self.reset(next_seed)
         
-        Args:
-            config: Environment configuration
-        """
-        pass
+    def step(self, action: int):
+        info = {'action_is_valid': True}
+        previous_pos = self.player_position
+        _, reward, done, _ = GymSokobanEnv.step(self, action) 
+        next_obs = self.render()
+        info["action_is_effective"] = not np.array_equal(previous_pos, self.player_position)
+        info["success"] = self.boxes_on_target == self.num_boxes
+        return next_obs, reward, done, info
+
+    def render(self, mode=None):
+        render_mode = mode if mode is not None else self.render_mode
+        if render_mode == 'text':
+            room = np.where((self.room_state == 5) & (self.room_fixed == 2), 6, self.room_state)
+            return '\n'.join(''.join(self.GRID_LOOKUP.get(cell, "?") for cell in row) for row in room.tolist())
+        elif render_mode == 'rgb_array':
+            return self.get_image(mode='rgb_array', scale=1)
+        else:
+            raise ValueError(f"Invalid mode: {render_mode}")
     
-    def step(self, action):
-        """
-        Execute action in environment.
-        
-        Args:
-            action: Action to execute
-            
-        Returns:
-            tuple: (observation, reward, done, info)
-        """
-        pass
-    
-    def reset(self):
-        """
-        Reset environment to initial state.
-        
-        Returns:
-            observation: Initial observation
-        """
-        pass
-    
-    def render(self, mode='human'):
-        """
-        Render environment state.
-        
-        Args:
-            mode: Rendering mode
-        """
-        pass
-    
-    def generate_room(self):
-        """
-        Generate a new Sokoban room/level.
-        """
-        pass
+    def get_all_actions(self):
+        return list([k for k in self.ACTION_LOOKUP.keys()])
     
     def close(self):
-        """
-        Clean up environment resources.
-        """
-        pass
+        self.render_cache = None
+        super(SokobanEnv, self).close()
+
+
+# python -m lmgame.env.sokoban.env
+if __name__ == '__main__':
+    import matplotlib.pyplot as plt
+    config = {
+        "dim_room": (6, 6),
+        "num_boxes": 1,
+        "max_steps": 10,
+        "search_depth": 5,
+        "grid_lookup": {0: "#", 1: "_", 2: "O", 3: "√", 4: "X", 5: "P", 6: "S"},
+        "grid_vocab": {"#": "wall", "_": "empty", "O": "target", "√": "box on target", "X": "box", "P": "player", "S": "player on target"},
+        "action_lookup": {1: "Up", 2: "Down", 3: "Left", 4: "Right"},
+        "render_mode": "text"
+    }
+    env = SokobanEnv(config)
+    for i in range(1):
+        print(env.reset(seed=1010 + i))
+        print()
+    while True:
+        keyboard = input("Enter action: ")
+        if keyboard == 'q':
+            break
+        action = int(keyboard)
+        obs, reward, done, info = env.step(action)
+        print(f"Obs:\n{obs}")
+        print(f"Reward: {reward}, Done: {done}, Info: {info}")
+    np_img = env.render('rgb_array')
+    # save the image
+    plt.imsave('sokoban1.png', np_img)
