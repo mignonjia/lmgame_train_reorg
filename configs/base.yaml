@@ -1,0 +1,14 @@
+# ------ Training and Validation Tasks ------
+agent_length: 2
+train: [sokobanAgent]
+validation: [sokobanAgent]
+
+# ------ PPO Trainer Overrides ------
+
+
+
+
+
+
+
+
