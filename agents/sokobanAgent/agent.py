@@ -123,8 +123,11 @@ class SokobanAgent:
         self.messages.append({"role": "assistant", "content": llm_raw_response})
         self.cur_turn += 1
 
-        # Parse the LLM response to extract processed response and actions
-        processed_llm_response, actions = parse_model_response(llm_raw_response)
+        # Parse the LLM response to extract processed response and action content
+        processed_llm_response, action_content = parse_model_response(llm_raw_response)
+        
+        # Parse actions from action content using agent's action separator
+        actions = [action.strip() for action in action_content.split('||') if action.strip()]
 
         # Execute actions in environment
         obs = self.env.render()
