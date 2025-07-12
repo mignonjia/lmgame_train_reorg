@@ -1,6 +1,8 @@
 # ─────────────────── IMPORTS ───────────────────
-from typing import Tuple
 from agents import register_agent
+from agents.agent_utils import parse_model_response, Trajectory
+from .env import SokobanEnv
+import re
 
 # ─────────────────── SOKOBAN AGENT ───────────────────
 @register_agent("sokobanAgent")
@@ -10,33 +12,37 @@ class SokobanAgent:
     Manages game state, history, and LLM interactions.
     """
     
-    def __init__(self, config):
+    def __init__(self, config, group_id=0, seed=None):
         """
         Initialize agent with configuration.
         Sets up system prompt, prompt, max_turns, max_action_per_turn, 
         history, step_count, trajectory, and agent.config
         """
-        pass
-    
-    def initialize_env(self):
-        """
-        Initialize the Sokoban environment.
-        """
-        pass
-    
-    def parse_model_response(self, response: str) -> Tuple[str, str]:
-        """
-        Parse model response into thought and action.
+        self.tag = "sokoban"
+        self.group_id = group_id   
+        self.seed = seed
         
-        Args:
-            response: Raw LLM response string
-            
-        Returns:
-            tuple: (thought, action_str)
-        """
-        pass
+        self.agent_config = config['sokobanAgent']
+        self.env_config = config['sokobanEnv']
+
+        self.max_actions_per_turn = self.agent_config['max_actions_per_turn']
+        self.max_turns = self.agent_config['max_turns']
+        self.system_prompt = config['system_prompt']
+        self.initial_prompt = config['prompt']
+
+        self.env = SokobanEnv(self.env_config) # this is just to initialize the environment, so no need to use initialize_env function
+        self.reset(seed)
+        self.trajectory = Trajectory()
+
     
-    def get_llm_prompts(self, env_outputs):
+    # def initialize_env(self):
+    #     """
+    #     Initialize the Sokoban environment.
+    #     """
+    #     pass
+        
+    
+    def get_llm_prompts(self, obs, reward):
         """
         Convert environment outputs to LLM prompts.
         
@@ -46,9 +52,22 @@ class SokobanAgent:
         Returns:
             DataProto: Formatted prompts for LLM
         """
-        pass
+        self.cur_turn += 1
+
+        prompt = f"""
+        Reward of previous turn: {reward}
+
+        Turn {self.cur_turn}:
+        State: {obs}
+        You have {self.max_turns - self.cur_turn + 1} turns left, with each turn containing at most {self.max_actions_per_turn} actions.
+        """
+        
+        self.messages.append({"role": "user", "content": prompt})
+        
+        return self.messages
     
-    def get_env_outputs(self, llm_outputs):
+    
+    def get_env_outputs(self, llm_response):
         """
         Process LLM outputs and get environment outputs.
         
@@ -58,7 +77,25 @@ class SokobanAgent:
         Returns:
             env_outputs: Environment outputs after processing LLM response
         """
-        pass
+        
+        self.messages.append({"role": "assistant", "content": llm_response})
+
+        thought, actions = parse_model_response(llm_response)
+
+        obs = self.env.render()
+        total_reward = 0
+        done = False
+        executed_actions = []
+        for action in actions:
+            obs, reward, done, info = self.env.step(action)
+            total_reward += reward
+            executed_actions.append(action)
+            if done:
+                break
+        
+        return obs, total_reward, done
+            
+                
     
     def get_initial_env_outputs(self):
         """
@@ -75,11 +112,25 @@ class SokobanAgent:
         """
         pass
     
-    def reset(self):
+    def reset(self, seed=None):
         """
         Reset agent state for new episode.
         """
-        pass
+        obs = self.env.reset(seed=seed)
+        self.cur_turn = 1
+
+        prompt = f"""
+        {self.initial_prompt}
+        Turn {self.cur_turn}:
+        {obs}
+        You have {self.max_turns - self.cur_turn + 1} turns left, with each turn containing at most {self.max_actions_per_turn} actions.
+        """
+
+        self.messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": prompt}
+        ]
+        
     
     def close(self):
         """
