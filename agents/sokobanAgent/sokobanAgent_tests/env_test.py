@@ -190,6 +190,75 @@ def test_env_step_functionality():
     env.close()
 
 
+def test_env_action_mapping():
+    """Test environment action mapping with random actions from action space"""
+    print("🔍 Testing environment action mapping...")
+    
+    config = get_default_config()
+    env = SokobanEnv(config)
+    
+    # Reset environment
+    initial_obs = env.reset(seed=42)
+    print(f"   Initial state:\n{initial_obs}")
+    
+    # Get available actions from config
+    action_lookup = config.get('action_lookup', {})
+    available_actions = list(action_lookup.keys())
+    print(f"   Available actions from config: {available_actions}")
+    print(f"   Action mapping: {action_lookup}")
+    
+    # Test each action
+    for action in available_actions:
+        print(f"\n   Testing action {action} ({action_lookup[action]}):")
+        
+        # Reset to consistent state
+        env.reset(seed=42)
+        
+        # Take the action
+        try:
+            obs, reward, done, info = env.step(action)
+            
+            print(f"      Action executed successfully")
+            print(f"      Reward: {reward}")
+            print(f"      Done: {done}")
+            print(f"      Info: {info}")
+            print(f"      New state:\n{obs}")
+            
+            # Verify step worked
+            assert obs is not None
+            assert isinstance(obs, str)
+            assert isinstance(reward, (int, float))
+            assert isinstance(done, bool)
+            assert isinstance(info, dict)
+            
+        except Exception as e:
+            print(f"      ❌ Action {action} failed: {e}")
+            raise
+    
+    # Test with random actions multiple times
+    print(f"\n   Testing with 10 random actions:")
+    env.reset(seed=42)
+    
+    for i in range(10):
+        action = available_actions[i % len(available_actions)]
+        print(f"      Step {i+1}: Action {action} ({action_lookup[action]})")
+        
+        try:
+            obs, reward, done, info = env.step(action)
+            print(f"         → Reward: {reward}, Done: {done}, Valid: {info.get('action_is_valid', 'N/A')}, Effective: {info.get('action_is_effective', 'N/A')}")
+            
+            if done:
+                print(f"         → Episode finished at step {i+1}")
+                break
+                
+        except Exception as e:
+            print(f"         ❌ Step {i+1} failed: {e}")
+            break
+    
+    env.close()
+    print("✅ Action mapping test passed")
+
+
 def test_10_random_envs_three_times():
     """Main test: Launch 10 random environments three times and print room layouts"""
     print("🎯 MAIN TEST: Launching 10 random environments three times...")
@@ -368,11 +437,15 @@ if __name__ == "__main__":
         test_env_action_space()
         print()
         
-        print("Test 5: Environment rendering modes")
+        print("Test 5: Environment action mapping")
+        test_env_action_mapping()
+        print()
+        
+        print("Test 6: Environment rendering modes")
         test_env_rendering_modes()
         print()
         
-        print("Test 6: 10 random environments × 3 runs")
+        print("Test 7: 10 random environments × 3 runs")
         test_10_random_envs_three_times()
         print()
         
