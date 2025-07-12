@@ -1,148 +1,303 @@
 # ─────────────────── IMPORTS ───────────────────
+import random
+import yaml
+from typing import List, Dict, Any, Tuple
+from dataclasses import dataclass
+from agents.agent_utils import Trajectory, parse_model_response
+from agents.sokobanAgent.env import SokobanEnv
 from agents import register_agent
-from agents.agent_utils import parse_model_response, Trajectory
-from .env import SokobanEnv
-import re
+
+@dataclass
+class EnvOutput:
+    """Simple container for environment outputs that SyncMultiTurnRollout expects."""
+    done: bool = False
+    state: str = ""
+    reward: float = 0.0
+    info: Dict[str, Any] = None  # type: ignore
+    
+    def __post_init__(self):
+        if self.info is None:
+            self.info = {}
 
 # ─────────────────── SOKOBAN AGENT ───────────────────
 @register_agent("sokobanAgent")
 class SokobanAgent:
     """
-    Sokoban Agent for multi-turn RL training.
-    Manages game state, history, and LLM interactions.
+    Sokoban agent that manages environment interactions and conversation history.
+    Compatible with SyncMultiTurnRollout interface.
     """
     
-    def __init__(self, config, group_id=0, seed=None):
-        """
-        Initialize agent with configuration.
-        Sets up system prompt, prompt, max_turns, max_action_per_turn, 
-        history, step_count, trajectory, and agent.config
-        """
-        self.tag = "sokoban"
-        self.group_id = group_id   
-        self.seed = seed
+    def __init__(self, config, group_id=0, agent_id=0, seed=None, tag=None):
+        self.group_id = group_id
+        self.agent_id = agent_id
+        self.tag = tag
+        self.cur_turn = 0
+        
+        # Handle seed assignment - if None, randomly assign one
+        if seed is None:
+            self.seed = random.randint(0, 2**32 - 1)
+        else:
+            self.seed = seed
         
         self.agent_config = config['sokobanAgent']
         self.env_config = config['sokobanEnv']
 
         self.max_actions_per_turn = self.agent_config['max_actions_per_turn']
         self.max_turns = self.agent_config['max_turns']
-        self.system_prompt = config['system_prompt']
-        self.initial_prompt = config['prompt']
-
-        self.env = SokobanEnv(self.env_config) # this is just to initialize the environment, so no need to use initialize_env function
-        self.reset(seed)
-        self.trajectory = Trajectory()
-
-    
-    # def initialize_env(self):
-    #     """
-    #     Initialize the Sokoban environment.
-    #     """
-    #     pass
         
-    
-    def get_llm_prompts(self, obs, reward):
+        # Read prompts from configuration
+        self.system_prompt = self.agent_config.get('system_prompt', "You are a helpful AI assistant that solves Sokoban puzzles step by step.")
+        self.prompt = self.agent_config.get('prompt', "You are solving the Sokoban puzzle.")
+        self.prompt = self._build_enhanced_prompt(self.prompt)
+        
+        # Define turn prompt template for consistent formatting
+        self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\n You have {turns_remaining} turns left."""
+
+        self.initialize_env()
+        self.reset(self.seed)
+        self.trajectory_history = []  # List of Trajectory objects
+        self.messages = []
+
+    def _build_enhanced_prompt(self, base_prompt):
+        """Build enhanced prompt with environment info."""
+        enhanced_prompt = base_prompt
+        
+        # Add grid symbols
+        if self.env_config.get("grid_vocab"):
+            symbols = [f"{k}: {v}" for k, v in self.env_config["grid_vocab"].items()]
+            grid_vocab = f"\n\nGrid symbols: {', '.join(symbols)}"
+            enhanced_prompt += grid_vocab
+        
+        # Add available actions
+        if self.env_config.get("action_lookup"):
+            actions = list(self.env_config["action_lookup"].values())
+            action_lookup = f"\n\nAvailable actions: {', '.join(actions)}\nFormat: <answer>Action1 || Action2</answer>"
+            enhanced_prompt += action_lookup
+        
+        return enhanced_prompt
+
+    def initialize_env(self):
         """
-        Convert environment outputs to LLM prompts.
+        Initialize the Sokoban environment.
+        """
+        self.env = SokobanEnv(self.env_config)
+        
+    def get_llm_prompts(self, env_out):
+        """
+        Convert environment outputs to LLM prompts following SyncMultiTurnRollout interface.
         
         Args:
-            env_outputs: Environment outputs containing observation, reward, info
+            env_out: EnvOutput object containing current environment state
             
         Returns:
-            DataProto: Formatted prompts for LLM
+            List[Dict]: Messages in chat format for LLM
         """
-        self.cur_turn += 1
-
-        prompt = f"""
-        Reward of previous turn: {reward}
-
-        Turn {self.cur_turn}:
-        State: {obs}
-        You have {self.max_turns - self.cur_turn + 1} turns left, with each turn containing at most {self.max_actions_per_turn} actions.
-        """
+        # Add reward information if available
+        if env_out.reward != 0.0:
+            self.messages.append({"role": "user", "content": f"Reward: {env_out.reward}"})
         
-        self.messages.append({"role": "user", "content": prompt})
+        # Add new turn state using turn template
+        turn_content = self.turn_prompt_template.format(
+            turn_number=self.cur_turn + 1,
+            state=env_out.state,
+            turns_remaining=self.max_turns - self.cur_turn
+        )
+        self.messages.append({"role": "user", "content": turn_content})
         
         return self.messages
-    
     
     def get_env_outputs(self, llm_response):
         """
         Process LLM outputs and get environment outputs.
         
         Args:
-            llm_outputs: Outputs from LLM
+            llm_response: Raw LLM response string
             
         Returns:
-            env_outputs: Environment outputs after processing LLM response
+            EnvOutput: Environment outputs after processing LLM response
         """
+        # Store the raw response
+        llm_raw_response = llm_response
         
-        self.messages.append({"role": "assistant", "content": llm_response})
+        # Add assistant response to messages (using raw response)
+        self.messages.append({"role": "assistant", "content": llm_raw_response})
+        self.cur_turn += 1
 
-        thought, actions = parse_model_response(llm_response)
+        # Parse the LLM response to extract processed response and actions
+        processed_llm_response, actions = parse_model_response(llm_raw_response)
 
+        # Execute actions in environment
         obs = self.env.render()
         total_reward = 0
         done = False
         executed_actions = []
-        for action in actions:
-            obs, reward, done, info = self.env.step(action)
-            total_reward += reward
-            executed_actions.append(action)
-            if done:
-                break
         
-        return obs, total_reward, done
-            
-                
+        # Convert action strings to integers based on action lookup
+        action_lookup_reverse = {v: k for k, v in self.env_config['action_lookup'].items()}
+        
+        for action_str in actions:
+            # Try to convert action string to integer
+            try:
+                if action_str in action_lookup_reverse:
+                    action = action_lookup_reverse[action_str]
+                else:
+                    # Try direct integer conversion
+                    action = int(action_str)
+                    
+                obs, reward, done, info = self.env.step(action)
+                total_reward += reward
+                executed_actions.append(action)
+                if done:
+                    break
+            except (ValueError, KeyError):
+                # Skip invalid actions
+                continue
+        
+        # Check if we've reached max turns
+        if self.cur_turn >= self.max_turns:
+            done = True
+        
+        # Update trajectory history with both raw and processed responses
+        self.update_trajectory_history(
+            state=obs,
+            actions_left=max(0, self.max_turns - self.cur_turn),
+            actions=executed_actions,
+            reward=total_reward,
+            info={"success": done and total_reward > 0},
+            llm_response=processed_llm_response,  # Processed/formatted response
+            llm_raw_response=llm_raw_response     # Original raw response
+        )
+        
+        return EnvOutput(
+            done=done,
+            state=obs,
+            reward=total_reward,
+            info={"success": done and total_reward > 0}
+        )
     
     def get_initial_env_outputs(self):
         """
         Get initial environment outputs after first reset.
         
         Returns:
-            env_outputs: Initial environment state
+            EnvOutput: Initial environment state
         """
-        pass
+        obs = self.env.render()
+        return EnvOutput(
+            done=False,
+            state=obs,
+            reward=0.0,
+            info={}
+        )
     
-    def update_history(self):
+    def get_final_rollout_states(self):
         """
-        Update agent's interaction history.
+        Get final rollout states for PPO training.
+        
+        Returns:
+            Dict: Row dictionary containing trajectory data for training
         """
-        pass
+        # Build conversation history from messages
+        conversation_history = ""
+        for msg in self.messages:
+            role = msg["role"]
+            content = msg["content"]
+            if role == "system":
+                conversation_history += f"System: {content}\n"
+            elif role == "user":
+                conversation_history += f"User: {content}\n"
+            elif role == "assistant":
+                conversation_history += f"Assistant: {content}\n"
+        
+        # Get final response (last assistant message)
+        final_response = ""
+        for msg in reversed(self.messages):
+            if msg["role"] == "assistant":
+                final_response = msg["content"]
+                break
+        
+        # Calculate total episode reward
+        episode_reward = sum(traj.reward for traj in self.trajectory_history)
+        
+        # Build row dictionary for training
+        row_dict = {
+            'conversation_history': conversation_history,
+            'final_response': final_response,
+            'episode_reward': episode_reward,
+            'reward': episode_reward,  # Alias
+            'env_id': self.agent_id,
+            'group_id': self.group_id,
+            'uid': f"agent_{self.agent_id}_group_{self.group_id}",
+            'metrics': {
+                'sokobanAgent/success': int(any(traj.info.get('success', False) for traj in self.trajectory_history)),
+                'sokobanAgent/turns_taken': len(self.trajectory_history),
+                'sokobanAgent/total_reward': episode_reward
+            },
+            'tag': self.tag or 'sokobanAgent'
+        }
+        
+        return row_dict
+
+    def update_trajectory_history(self, state: str, actions_left: int, actions: List[int], 
+                                 reward: float, info: Dict[str, Any], llm_response: str, llm_raw_response: str):
+        """
+        Update agent's trajectory history.
+        
+        Args:
+            state: Current game state
+            actions_left: Remaining actions
+            actions: List of action IDs taken
+            reward: Reward received
+            info: Environment info dict
+            llm_response: Parsed LLM response
+            llm_raw_response: Raw LLM response
+            
+        Returns:
+            List[Trajectory]: Updated trajectory history
+        """
+        # Create new trajectory for this step
+        trajectory = Trajectory(
+            state=state,
+            actions_left=actions_left,
+            actions=actions,
+            reward=reward,
+            info=info,
+            llm_response=llm_response,
+            llm_raw_response=llm_raw_response
+        )
+        
+        # Add to history
+        self.trajectory_history.append(trajectory)
+        
+        return self.trajectory_history
     
     def reset(self, seed=None):
-        """
-        Reset agent state for new episode.
-        """
-        obs = self.env.reset(seed=seed)
-        self.cur_turn = 1
+        """Reset agent state for new episode."""
+        # Reset environment
+        reset_seed = seed if seed is not None else self.seed
+        obs = self.env.reset(seed=reset_seed)
+        self.cur_turn = 0
+        
+        # Clear trajectory history
+        self.trajectory_history = []
 
-        prompt = f"""
-        {self.initial_prompt}
-        Turn {self.cur_turn}:
-        {obs}
-        You have {self.max_turns - self.cur_turn + 1} turns left, with each turn containing at most {self.max_actions_per_turn} actions.
-        """
-
+        # Initialize messages following ContextManager pattern
         self.messages = [
             {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": prompt}
+            {"role": "user", "content": self.prompt}
         ]
         
-    
+        # Add first turn state using turn template
+        turn_content = self.turn_prompt_template.format(
+            turn_number=self.cur_turn + 1,
+            state=obs,
+            turns_remaining=self.max_turns - self.cur_turn
+        )
+        self.messages[-1]["content"] += f"\n{turn_content}"
+        
     def close(self):
         """
         Clean up agent resources.
         """
-        pass
-    
-    def make_update_row(self):
-        """
-        Create update row for PPO training.
-        
-        Returns:
-            dict: Training data row
-        """
-        pass
+        if hasattr(self, 'env') and hasattr(self.env, 'close'):
+            self.env.close()

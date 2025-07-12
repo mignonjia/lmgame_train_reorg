@@ -123,10 +123,10 @@ class SyncMultiTurnRollout:
             prompt_str = self.tokenizer.apply_chat_template(messages, tokenize=False)
             prompts.append(prompt_str)
             idx_map.append(idx)
-        
+
         if not prompts:  # All agents done
             return None, None
-        
+
         # Pad to GPU multiple if needed
         while len(prompts) % self.cfg.n_gpus_per_node:
             # Duplicate the last prompt for padding
@@ -239,12 +239,12 @@ class SyncMultiTurnRollout:
         for turn in range(self.cfg.agent.max_turn):
             if self.done_mask.all():
                 break
-            
+
             # Collect prompts from active agents
             prompts, idx_map = self._collect_prompts()
             if prompts is None:
                 break
-            
+
             # Generate responses
             replies = self._dispatch(prompts)
             
@@ -252,7 +252,7 @@ class SyncMultiTurnRollout:
             self.update_env_outputs(replies, idx_map)
             
             self.step_cnt += 1
-        
+
         return self.env_outs
 
     # ─────────────────── PPO BATCH BUILDING ───────────────────

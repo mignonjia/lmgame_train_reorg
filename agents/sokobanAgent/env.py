@@ -1,9 +1,8 @@
 import gym
 from gym_sokoban.envs.sokoban_env import SokobanEnv as GymSokobanEnv
 import numpy as np
+from agents.agent_utils import all_seed
 from .utils import generate_room
-from lmgame.utils import all_seed
-import ray
 
 class SokobanEnv(GymSokobanEnv):
     def __init__(self, config, **kwargs):
@@ -63,33 +62,3 @@ class SokobanEnv(GymSokobanEnv):
     def close(self):
         self.render_cache = None
         super(SokobanEnv, self).close()
-
-
-# python -m lmgame.env.sokoban.env
-if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-    config = {
-        "dim_room": (6, 6),
-        "num_boxes": 1,
-        "max_steps": 10,
-        "search_depth": 5,
-        "grid_lookup": {0: "#", 1: "_", 2: "O", 3: "√", 4: "X", 5: "P", 6: "S"},
-        "grid_vocab": {"#": "wall", "_": "empty", "O": "target", "√": "box on target", "X": "box", "P": "player", "S": "player on target"},
-        "action_lookup": {1: "Up", 2: "Down", 3: "Left", 4: "Right"},
-        "render_mode": "text"
-    }
-    env = SokobanEnv(config)
-    for i in range(1):
-        print(env.reset(seed=1010 + i))
-        print()
-    while True:
-        keyboard = input("Enter action: ")
-        if keyboard == 'q':
-            break
-        action = int(keyboard)
-        obs, reward, done, info = env.step(action)
-        print(f"Obs:\n{obs}")
-        print(f"Reward: {reward}, Done: {done}, Info: {info}")
-    np_img = env.render('rgb_array')
-    # save the image
-    plt.imsave('sokoban1.png', np_img)
