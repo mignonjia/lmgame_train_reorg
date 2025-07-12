@@ -1,5 +1,6 @@
 # ------ Training and Validation Tasks ------
-agent_length: 2
+agent_batch_size: 4
+agent_group_size: 2
 train: [sokobanAgent]
 validation: [sokobanAgent]
 

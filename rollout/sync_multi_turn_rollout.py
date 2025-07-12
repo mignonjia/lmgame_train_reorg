@@ -61,18 +61,36 @@ class SyncMultiTurnRollout:
         """
         Build self.agents: List[Agent], self.done_mask, self.env_outs
         Each agent handles its own history & recorder.
+        Agents are grouped based on agent_group_size for training purposes.
         """
         # Create agents of the same type
         if self.agent_cls is None:
             raise ValueError("agent_cls is None but trying to create agents")
         
-        self.agents = [
-            self.agent_cls(
-                self.cfg.env_template[idx] if hasattr(self.cfg, "env_template") 
-                else self.cfg
+        # Get group size from config, default to 1 if not specified
+        agent_group_size = getattr(self.cfg, 'agent_group_size', 1)
+        
+        # Calculate number of groups
+        num_groups = self.n_agents // agent_group_size
+        if self.n_agents % agent_group_size != 0:
+            raise ValueError(f"agent_batch_size ({self.n_agents}) must be divisible by agent_group_size ({agent_group_size})")
+        
+        print(f"Creating {self.n_agents} agents in {num_groups} groups of size {agent_group_size}")
+        
+        self.agents = []
+        for idx in range(self.n_agents):
+            # Calculate group_id for this agent
+            group_id = idx // agent_group_size
+            
+            # Create agent with agent_id and group_id
+            agent = self.agent_cls(
+                config=self.cfg.env_template[idx] if hasattr(self.cfg, "env_template") else self.cfg,
+                agent_id=idx,
+                group_id=group_id
             )
-            for idx in range(self.n_agents)
-        ]
+            
+            self.agents.append(agent)
+            print(f"  Agent {idx}: group_id={group_id}")
         
         # Tracking structures (indexed by position)
         self.done_mask = torch.zeros(self.n_agents, dtype=torch.bool)
@@ -100,8 +118,9 @@ class SyncMultiTurnRollout:
             agent = self.agents[idx]
             env_out = self.env_outs[idx]
             
-            # Each agent returns a single prompt string
-            prompt_str = agent.get_llm_prompts(env_out)
+            # Each agent returns messages format
+            messages = agent.get_llm_prompts(env_out)
+            prompt_str = self.tokenizer.apply_chat_template(messages, tokenize=False)
             prompts.append(prompt_str)
             idx_map.append(idx)
         
