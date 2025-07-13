@@ -10,8 +10,18 @@ class SokobanEnv(GymSokobanEnv):
         self.GRID_LOOKUP = self.config['grid_lookup']
         self.ACTION_LOOKUP = self.config['action_lookup']
         self.search_depth = self.config['search_depth']
-        self.ACTION_SPACE = gym.spaces.discrete.Discrete(4, start=1)
+        self.ACTION_SPACE = gym.spaces.discrete.Discrete(4, start=1)  # Our config uses actions 1-4
         self.render_mode = self.config['render_mode']
+        
+        # Mapping from our config actions to gym_sokoban move actions
+        # Our config: 1=Up, 2=Down, 3=Left, 4=Right
+        # gym_sokoban: 5=Move Up, 6=Move Down, 7=Move Left, 8=Move Right
+        self.action_mapping = {
+            1: 5,  # Up -> Move Up
+            2: 6,  # Down -> Move Down  
+            3: 7,  # Left -> Move Left
+            4: 8   # Right -> Move Right
+        }
 
         GymSokobanEnv.__init__(
             self,
@@ -40,7 +50,11 @@ class SokobanEnv(GymSokobanEnv):
     def step(self, action: int):
         info = {'action_is_valid': True}
         previous_pos = self.player_position
-        _, reward, done, _ = GymSokobanEnv.step(self, action) 
+        
+        # Convert our config action to gym_sokoban action
+        gym_action = self.action_mapping.get(action, action)
+        
+        _, reward, done, _ = GymSokobanEnv.step(self, gym_action) 
         next_obs = self.render()
         info["action_is_effective"] = not np.array_equal(previous_pos, self.player_position)
         info["success"] = self.boxes_on_target == self.num_boxes

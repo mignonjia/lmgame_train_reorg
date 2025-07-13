@@ -1,3 +1,5 @@
+#TODO: Align with reported performance in the sokoban rl training
+#TODO: be careful with the parse_response logic, which may be associated with format penality.
 # ─────────────────── IMPORTS ───────────────────
 import random
 import yaml
@@ -42,8 +44,9 @@ class SokobanAgent:
         self.agent_config = config['sokobanAgent']
         self.env_config = config['sokobanEnv']
 
-        self.max_actions_per_turn = self.agent_config['max_actions_per_turn']
         self.max_turns = self.agent_config['max_turns']
+        self.max_actions_all_turns = self.agent_config['max_actions_all_turns']
+        self.format_penalty = self.agent_config.get('format_penalty', 0.0)
         
         self.system_prompt = self.agent_config.get('system_prompt', "You are a helpful AI assistant that solves Sokoban puzzles step by step.")
         self.prompt = self.agent_config.get('prompt', "You are solving the Sokoban puzzle.")
@@ -52,9 +55,10 @@ class SokobanAgent:
         self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\n You have {turns_remaining} turns left."""
 
         self.initialize_env()
-        self.reset(self.seed)
         self.trajectory_history = []
         self.messages = []
+        self.total_actions_consumed = 0
+        self.penalty = 0.0  # Track accumulated penalty
 
     def _build_enhanced_prompt(self, base_prompt):
         """Build enhanced prompt with environment info."""
@@ -98,7 +102,7 @@ class SokobanAgent:
         self.messages.append({"role": "assistant", "content": llm_raw_response})
         self.cur_turn += 1
 
-        processed_llm_response, action_content = parse_model_response(llm_raw_response)
+        processed_llm_response, action_content = parse_model_response(llm_raw_response, enable_think=False)
         
         actions = [action.strip() for action in action_content.split('||') if action.strip()]
 
@@ -106,33 +110,54 @@ class SokobanAgent:
         total_reward = 0
         done = False
         executed_actions = []
+        info = {}  # Initialize info dictionary
         
         action_lookup_reverse = {v: k for k, v in self.env_config['action_lookup'].items()}
+        
+        valid_actions = []
+        invalid_actions = []
         
         for action_str in actions:
             try:
                 if action_str in action_lookup_reverse:
                     action = action_lookup_reverse[action_str]
+                    valid_actions.append(action)
                 else:
                     action = int(action_str)
-                    
-                obs, reward, done, info = self.env.step(action)
-                total_reward += reward
-                executed_actions.append(action)
-                if done:
-                    break
-            except (ValueError, KeyError):
+                    valid_actions.append(action)
+            except (ValueError, KeyError) as e:
+                invalid_actions.append(action_str)
                 continue
         
-        if self.cur_turn >= self.max_turns:
+        # Apply penalty for invalid actions
+        if invalid_actions or len(valid_actions) != len(actions):
+            self.penalty += self.format_penalty
+        
+        # Execute valid actions
+        for action in valid_actions:
+            obs, reward, done, step_info = self.env.step(action)
+            total_reward += reward
+            executed_actions.append(action)
+            info.update(step_info)  # Update info with step info
+            if done:
+                break
+        
+        # Update total actions consumed
+        self.total_actions_consumed += len(executed_actions)
+        
+        # Calculate actions left based on max_actions_all_turns
+        actions_left = max(0, self.max_actions_all_turns - self.total_actions_consumed)
+        
+        # Check if done due to max turns or max actions
+        if self.cur_turn >= self.max_turns or self.total_actions_consumed >= self.max_actions_all_turns:
             done = True
         
         self.update_trajectory_history(
             state=obs,
-            actions_left=max(0, self.max_turns - self.cur_turn),
+            actions_left=actions_left,
             actions=executed_actions,
             reward=total_reward,
-            info={"success": done and total_reward > 0},
+            info=info,
             llm_response=processed_llm_response,
             llm_raw_response=llm_raw_response
         )
@@ -141,55 +166,58 @@ class SokobanAgent:
             done=done,
             state=obs,
             reward=total_reward,
-            info={"success": done and total_reward > 0}
-        )
-    
-    def get_initial_env_outputs(self):
-        """Get initial environment outputs after first reset."""
-        obs = self.env.render()
-        return EnvOutput(
-            done=False,
-            state=obs,
-            reward=0.0,
-            info={}
+            info=info
         )
     
     # ─────────────────── ROLLOUT STATE COLLECTION ───────────────────
     def get_final_rollout_states(self):
         """Get final rollout states for PPO training."""
-        conversation_history = ""
-        for msg in self.messages:
-            role = msg["role"]
-            content = msg["content"]
-            if role == "system":
-                conversation_history += f"System: {content}\n"
-            elif role == "user":
-                conversation_history += f"User: {content}\n"
-            elif role == "assistant":
-                conversation_history += f"Assistant: {content}\n"
+        history = []
+        for traj in self.trajectory_history:
+            history_entry = {
+                'state': traj.state,
+                'actions_left': traj.actions_left,
+                'actions': traj.actions,
+                'reward': traj.reward,
+                'info': traj.info,
+                'llm_response': traj.llm_response,
+                'llm_raw_response': traj.llm_raw_response
+            }
+            history.append(history_entry)
         
-        final_response = ""
-        for msg in reversed(self.messages):
-            if msg["role"] == "assistant":
-                final_response = msg["content"]
-                break
+        metrics = {}
         
-        episode_reward = sum(traj.reward for traj in self.trajectory_history)
+        success_values = [traj.info.get('success', False) for traj in self.trajectory_history]
+        metrics[f'{self.tag or "sokobanAgent"}/success'] = float(any(success_values))
+        
+        total_actions = sum(len(traj.actions) for traj in self.trajectory_history)
+        metrics[f'{self.tag or "sokobanAgent"}/num_actions'] = total_actions
+        
+        action_is_effective_values = [traj.info.get('action_is_effective', False) for traj in self.trajectory_history]
+        if action_is_effective_values:
+            metrics[f'{self.tag or "sokobanAgent"}/action_is_effective'] = sum(action_is_effective_values) / len(action_is_effective_values)
+        else:
+            metrics[f'{self.tag or "sokobanAgent"}/action_is_effective'] = 0.0
+        
+        action_is_valid_values = [traj.info.get('action_is_valid', True) for traj in self.trajectory_history]
+        if action_is_valid_values:
+            metrics[f'{self.tag or "sokobanAgent"}/action_is_valid'] = sum(action_is_valid_values) / len(action_is_valid_values)
+        else:
+            metrics[f'{self.tag or "sokobanAgent"}/action_is_valid'] = 1.0
+        
+        if self.trajectory_history:
+            last_traj = self.trajectory_history[-1]
+            if 'metrics' in last_traj.info:
+                for key, value in last_traj.info['metrics'].items():
+                    metrics[key] = value
         
         row_dict = {
-            'conversation_history': conversation_history,
-            'final_response': final_response,
-            'episode_reward': episode_reward,
-            'reward': episode_reward,
             'env_id': self.agent_id,
+            'history': history,
             'group_id': self.group_id,
-            'uid': f"agent_{self.agent_id}_group_{self.group_id}",
-            'metrics': {
-                'sokobanAgent/success': int(any(traj.info.get('success', False) for traj in self.trajectory_history)),
-                'sokobanAgent/turns_taken': len(self.trajectory_history),
-                'sokobanAgent/total_reward': episode_reward
-            },
-            'tag': self.tag or 'sokobanAgent'
+            'tag': self.tag or 'sokobanAgent',
+            'metrics': metrics,
+            'penalty': self.penalty
         }
         
         return row_dict
@@ -214,25 +242,28 @@ class SokobanAgent:
     
     # ─────────────────── LIFECYCLE MANAGEMENT ───────────────────
     def reset(self, seed=None):
-        """Reset agent state for new episode."""
+        """Reset agent state for new episode and return initial environment outputs."""
         reset_seed = seed if seed is not None else self.seed
         obs = self.env.reset(seed=reset_seed)
         self.cur_turn = 0
         
         self.trajectory_history = []
+        self.total_actions_consumed = 0
+        self.penalty = 0.0  # Reset penalty for new episode
 
         self.messages = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": self.prompt}
         ]
         
-        turn_content = self.turn_prompt_template.format(
-            turn_number=self.cur_turn + 1,
+        # Return initial environment outputs for the rollout loop
+        return EnvOutput(
+            done=False,
             state=obs,
-            turns_remaining=self.max_turns - self.cur_turn
+            reward=0.0,
+            info={}
         )
-        self.messages[-1]["content"] += f"\n{turn_content}"
-        
+
     def close(self):
         """Clean up agent resources."""
         if hasattr(self, 'env') and hasattr(self.env, 'close'):

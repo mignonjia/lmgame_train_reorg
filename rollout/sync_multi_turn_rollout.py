@@ -250,6 +250,8 @@ class SyncMultiTurnRollout:
             
             # Apply responses back to agents
             self.update_env_outputs(replies, idx_map)
+
+            #TODO: Early stopping. If max_actions_all_turns is reached or env is done, break.
             
             self.step_cnt += 1
 
