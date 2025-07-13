@@ -25,12 +25,81 @@ from omegaconf import OmegaConf
 from trainer.agent_trainer import AgentTrainer
 from verl.trainer.ppo.reward import load_reward_manager
 
-def 
+
+# ------ Config Dependency Function ------
+def add_dependency(config):
+    """
+    Initialize dependent configuration values based on base config values.
+    
+    Args:
+        config: The OmegaConf configuration object
+        
+    Returns:
+        config: The updated configuration object
+    """
+    print("Setting up configuration dependencies...")
+    
+    # Set up data configuration
+    if hasattr(config, 'train_batch_size'):
+        config.data.train_batch_size = config.train_batch_size
+        print(f"config.data.train_batch_size: {config.data.train_batch_size}")
+    
+    # Set up model paths
+    if hasattr(config, 'model_path'):
+        config.actor_rollout_ref.model.path = config.model_path
+        config.critic.model.path = config.model_path
+        print(f"config.actor_rollout_ref.model.path: {config.actor_rollout_ref.model.path}")
+    
+    # Set up batch sizes
+    if hasattr(config, 'ppo_mini_batch_size'):
+        config.actor_rollout_ref.actor.ppo_mini_batch_size = config.ppo_mini_batch_size
+        config.critic.ppo_mini_batch_size = config.ppo_mini_batch_size
+        print(f"config.ppo_mini_batch_size: {config.ppo_mini_batch_size}")
+    
+    # Set up micro batch sizes
+    if hasattr(config, 'micro_batch_size_per_gpu'):
+        config.actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu = config.micro_batch_size_per_gpu
+        config.actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu = config.micro_batch_size_per_gpu
+        config.actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu = config.micro_batch_size_per_gpu
+        config.critic.ppo_micro_batch_size_per_gpu = config.micro_batch_size_per_gpu
+        print(f"config.micro_batch_size_per_gpu: {config.micro_batch_size_per_gpu}")
+    
+    # Set up training steps
+    if hasattr(config, 'total_training_steps'):
+        config.trainer.total_training_steps = config.total_training_steps
+        print(f"config.trainer.total_training_steps: {config.trainer.total_training_steps}")
+    
+    # Set up GPU configuration
+    if hasattr(config, 'n_gpus_per_node'):
+        config.trainer.n_gpus_per_node = config.n_gpus_per_node
+        print(f"config.trainer.n_gpus_per_node: {config.trainer.n_gpus_per_node}")
+    
+    # Set up project configuration
+    if hasattr(config, 'project_name'):
+        config.trainer.project_name = config.project_name
+        print(f"config.trainer.project_name: {config.trainer.project_name}")
+    
+    if hasattr(config, 'experiment_name'):
+        config.trainer.experiment_name = config.experiment_name
+        print(f"config.trainer.experiment_name: {config.trainer.experiment_name}")
+    
+    return config
 
 
 @hydra.main(config_path="configs", config_name="ppo_trainer", version_base=None)
 def main(config):
+    # First resolve configuration variables
+    OmegaConf.resolve(config)
+
     print(f"config: {config}")
+    
+    # # Then apply dependency setup
+    # config = add_dependency(config)
+    
+    # print(f"Final config model_path: {config.actor_rollout_ref.model.path}")
+    # print(f"Final config train_batch_size: {config.data.train_batch_size}")
+    # print(f"Final config micro_batch_size_per_gpu: {config.micro_batch_size_per_gpu}")
+    
     run_ppo(config)
 
 
