@@ -125,57 +125,6 @@ trainer:
     val: 20
   logger: ['console', 'wandb']
 
-# ------ Agent Proxy Configuration ------
-agent_proxy:
-  max_context_window: -1 # set > 0 to enable context window for long trajectory
-  max_turn: 5 # matches agents.yaml max_turns
-  action_sep: "||" # matches agent action separator
-  max_actions_per_turn: 5
-  use_turn_scores: False # important for GAE with token-level rewards
-  enable_think: False # matches agents.yaml enable_think default
-  reward_normalization:
-    grouping: "state" # state / batch / inductive
-    method: "identity" # asym_clip / identity / mean_std
-
-# ------ Environment and Agent Management ------
-es_manager:
-  format_penalty: -0.1 # matches agents.yaml format_penalty
-  train:
-    env_groups: 2 # agent_batch_size / agent_group_size
-    group_size: 2 # matches agent_group_size
-    env_configs:
-      tags: ["sokobanAgent"]
-      n_groups: [2]
-  val:
-    env_groups: 4
-    group_size: 1 # should be 1 for validation to avoid repetitive prompts
-    env_configs:
-      tags: ["sokobanAgent"]
-      n_groups: [4]
-
-# ------ Context Manager Configuration ------
-ctx_manager:
-  generation:
-    gen_config:
-      response_length: ${actor_rollout_ref.rollout.response_length}
-      temperature: ${actor_rollout_ref.rollout.temperature}
-      top_p: ${actor_rollout_ref.rollout.top_p}
-      top_k: ${actor_rollout_ref.rollout.top_k}
-      kwargs: null
-
-# ------ Agent-specific configurations (from agents.yaml) ------
-agent:
-  max_turn: 5 # matches sokobanAgent max_turns
-  enable_think: False # matches sokobanAgent default
-  max_actions_all_turns: 10 # from sokobanAgent config
-  max_prompt_length: 2048 # for tokenization
-  truncation: 'right' # for prompt truncation
-  use_turn_scores: False # for reward processing
-
-
-
-
-
 
 
 

@@ -130,9 +130,9 @@ def create_real_tokenizer():
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B")
         
         # Ensure pad token is set
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    
         # Apply mock tokenizer decode for testing
         tokenizer = create_mock_tokenizer_decode(tokenizer)
         
