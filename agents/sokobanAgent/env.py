@@ -7,11 +7,11 @@ from .utils import generate_room
 class SokobanEnv(GymSokobanEnv):
     def __init__(self, config, **kwargs):
         self.config = config
-        self.GRID_LOOKUP = self.config['grid_lookup']
-        self.ACTION_LOOKUP = self.config['action_lookup']
-        self.search_depth = self.config['search_depth']
+        self.GRID_LOOKUP = self.config.get('grid_lookup', {0: "#", 1: "_", 2: "O", 3: "√", 4: "X", 5: "P", 6: "S"})
+        self.ACTION_LOOKUP = self.config.get('action_lookup', {1: "Up", 2: "Down", 3: "Left", 4: "Right"})
+        self.search_depth = self.config.get('search_depth', 300)
         self.ACTION_SPACE = gym.spaces.discrete.Discrete(4, start=1)  # Our config uses actions 1-4
-        self.render_mode = self.config['render_mode']
+        self.render_mode = self.config.get('render_mode', 'text')
         
         # Mapping from our config actions to gym_sokoban move actions
         # Our config: 1=Up, 2=Down, 3=Left, 4=Right
@@ -25,9 +25,9 @@ class SokobanEnv(GymSokobanEnv):
 
         GymSokobanEnv.__init__(
             self,
-            dim_room=self.config['dim_room'], 
-            max_steps=self.config['max_steps'],
-            num_boxes=self.config['num_boxes'],
+            dim_room=self.config.get('dim_room', (6, 6)), 
+            max_steps=self.config.get('max_steps', 100),
+            num_boxes=self.config.get('num_boxes', 1),
             **kwargs
         )
 

@@ -41,11 +41,19 @@ class SokobanAgent:
         else:
             self.seed = seed
         
-        self.agent_config = config['sokobanAgent']
-        self.env_config = config['sokobanEnv']
+        # Handle both old and new config formats
+        if 'sokobanAgent' in config:
+            # New nested format
+            sokoban_config = config['sokobanAgent']
+            self.agent_config = sokoban_config.get('agent_config', {})
+            self.env_config = sokoban_config.get('env_config', {})
+        else:
+            # Old flat format (backward compatibility)
+            self.agent_config = config
+            self.env_config = config
 
-        self.max_turns = self.agent_config['max_turns']
-        self.max_actions_all_turns = self.agent_config['max_actions_all_turns']
+        self.max_turns = self.agent_config.get('max_turns', 5)
+        self.max_actions_all_turns = self.agent_config.get('max_actions_all_turns', 10)
         self.format_penalty = self.agent_config.get('format_penalty', 0.0)
         
         self.system_prompt = self.agent_config.get('system_prompt', "You are a helpful AI assistant that solves Sokoban puzzles step by step.")

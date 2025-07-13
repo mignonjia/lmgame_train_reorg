@@ -6,6 +6,7 @@ from verl.utils.dataset.rl_dataset import collate_fn
 import verl.utils.torch_functional as verl_F
 from agents import get_agent_cls, REGISTERED_AGENTS
 import numpy as np
+from tensordict import TensorDict
 
 
 class SyncMultiTurnRollout:
@@ -48,7 +49,7 @@ class SyncMultiTurnRollout:
     def _setup_agent_config(self):
         """
         Setup agent configuration for single agent type.
-        Agent class is resolved from config.
+        Agent class is resolved from config and agent config is extracted.
         """
         # Get agent name from train list (first item)
         train_agents = getattr(self.cfg, 'train', ['sokobanAgent'])
@@ -56,12 +57,22 @@ class SyncMultiTurnRollout:
         
         # Resolve agent class from registry
         self.agent_cls = get_agent_cls(agent_name)
+        
+        # Extract agent configuration from agents.yaml format
+        # The config should contain the agent configuration under the agent name
+        if hasattr(self.cfg, agent_name):
+            self.agent_config = getattr(self.cfg, agent_name)
+        elif agent_name in self.cfg:
+            self.agent_config = self.cfg[agent_name]
+        else:
+            raise ValueError(f"Agent configuration for '{agent_name}' not found in config")
 
     def _init_batch_agents(self):
         """
-        Build self.agents: List[Agent], self.done_mask, self.env_outs
+        Build self.agents: List[Agent] and collect batch of agents.reset() outputs.
         Each agent handles its own history & recorder.
         Agents are grouped based on agent_group_size for training purposes.
+        Initializes self.done_mask and self.env_outs with initial environment states.
         """
         # Create agents of the same type
         if self.agent_cls is None:
@@ -78,178 +89,125 @@ class SyncMultiTurnRollout:
         print(f"Creating {self.n_agents} agents in {num_groups} groups of size {agent_group_size}")
         
         self.agents = []
+        initial_env_outs = []
+        
         for idx in range(self.n_agents):
             # Calculate group_id for this agent
             group_id = idx // agent_group_size
             
-            # Create agent with agent_id and group_id
+            # Create agent with the extracted agent configuration
             agent = self.agent_cls(
-                config=self.cfg.env_template[idx] if hasattr(self.cfg, "env_template") else self.cfg,
+                config=self.agent_config,
                 agent_id=idx,
                 group_id=group_id
             )
             
-            self.agents.append(agent)
-            print(f"  Agent {idx}: group_id={group_id}")
-        
-        # Tracking structures (indexed by position)
-        self.done_mask = torch.zeros(self.n_agents, dtype=torch.bool)
-        self.env_outs = [
-            self.agents[idx].get_initial_env_outputs() 
-            for idx in range(self.n_agents)
-        ]
-
-    # ─────────────────── PROMPT COLLECTION ───────────────────
-    def _collect_prompts_from_agents(self):
-        """
-        Collect prompts from all alive agents.
-        Each agent.get_llm_prompts(env_out) returns a single prompt string.
-        
-        Returns:
-            prompts: List[str] - List of prompt strings from active agents
-            idx_map: List[int] - Mapping from batch index to agent index
-        """
-        prompts, idx_map = [], []
-        
-        for idx in range(self.n_agents):
-            if self.done_mask[idx]:
-                continue
-                
-            agent = self.agents[idx]
-            env_out = self.env_outs[idx]
+            # Reset agent and collect initial environment output
+            initial_env_out = agent.reset()
             
-            # Each agent returns messages format
-            messages = agent.get_llm_prompts(env_out)
-            prompt_str = self.tokenizer.apply_chat_template(messages, tokenize=False)
-            prompts.append(prompt_str)
-            idx_map.append(idx)
-
-        if not prompts:  # All agents done
-            return None, None
-
-        # Pad to GPU multiple if needed
-        while len(prompts) % self.cfg.n_gpus_per_node:
-            # Duplicate the last prompt for padding
-            prompts.append(prompts[-1])
+            self.agents.append(agent)
+            initial_env_outs.append(initial_env_out)
+            print(f"  Agent {idx}: group_id={group_id}, initial_state_preview={initial_env_out.state[:20]}...")
         
-        return prompts, idx_map
+        # Initialize tracking structures with batch of reset outputs
+        self.done_mask = torch.zeros(self.n_agents, dtype=torch.bool)
+        self.env_outs = initial_env_outs
 
-    def _convert_prompts_to_dataproto(self, prompts: List[str]):
+    # ─────────────────── BATCH LLM PROMPTS ───────────────────
+    def get_batch_llm_prompts(self, env_outputs):
         """
-        Convert a batch of prompt strings to DataProto.
-        Following the QwenVLRolloutManager pattern for text-only inputs.
+        Generate batch of LLM prompts from environment outputs.
+        Each agent.get_llm_prompts(env_out) returns messages format.
         
         Args:
-            prompts: List[str] - List of prompt strings
+            env_outputs: List of environment outputs from agents
             
         Returns:
             DataProto: Batched DataProto containing input_ids, attention_mask, position_ids
         """
-        batch_list = []
+        llm_input_texts = []
         
-        for prompt_str in prompts:
-            # Create row_dict for each prompt following QwenVLRolloutManager pattern
-            row_dict = {}
-            
-            # Tokenize and postprocess the prompt
-            input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(
-                prompt=prompt_str,
-                tokenizer=self.tokenizer,
-                max_length=getattr(self.cfg, 'max_prompt_length', 2048),
-                pad_token_id=self.tokenizer.pad_token_id,
-                left_pad=False,
-                truncation=getattr(self.cfg, 'truncation', 'right')
-            )
-            
-            # Compute position ids
-            from verl.utils.model import compute_position_id_with_mask
-            position_ids = compute_position_id_with_mask(attention_mask)
-            
-            # Build row_dict
-            row_dict['input_ids'] = input_ids.squeeze(0)  # Remove batch dimension
-            row_dict['attention_mask'] = attention_mask.squeeze(0)  # Remove batch dimension  
-            row_dict['position_ids'] = position_ids.squeeze(0)  # Remove batch dimension
-            
-            batch_list.append(row_dict)
-        
-        # Use collate_fn to batch the data, then convert to DataProto
-        batch_dict = collate_fn(batch_list)
-        return DataProto.from_single_dict(batch_dict)
-
-    def _collect_prompts(self):
-        """
-        Main prompt collection function that orchestrates the two-step process:
-        1. Collect prompts from all alive agents
-        2. Convert the batch of prompts to DataProto
-        
-        Returns:
-            batched_dataproto: DataProto containing batched prompts
-            idx_map: List[int] - Mapping from batch index to agent index
-        """
-        # Step 1: Collect prompts from agents
-        prompts, idx_map = self._collect_prompts_from_agents()
-        if prompts is None:
-            return None, None
-        
-        # Step 2: Convert batch of prompts to DataProto
-        batched_dataproto = self._convert_prompts_to_dataproto(prompts)
-        
-        return batched_dataproto, idx_map
-
-    # ─────────────────── LLM DISPATCH ───────────────────
-    @torch.no_grad()
-    def _dispatch(self, prompt_batch: DataProto):
-        """
-        Method 4: actor_rollout_wg.generate_sequences → List[str]
-        Ultra-thin wrapper.
-        """
-        output = self.actor_wg.generate_sequences(prompt_batch)
-        return self.tokenizer.batch_decode(
-            output.batch["responses"], 
-            skip_special_tokens=True
-        )
-
-    # ─────────────────── ENVIRONMENT OUTPUT UPDATES ───────────────────
-    def update_env_outputs(self, replies, idx_map):
-        """
-        Pass LLM replies back to the correct agents and update environment outputs.
-        Updates self.done_mask and self.env_outs based on agent responses.
-        Agents take care of update_history() internally.
-        
-        Args:
-            replies: List[str] - Generated text responses from LLM
-            idx_map: List[int] - Mapping from batch index to agent index
-        """
-        for reply, idx in zip(replies, idx_map):
+        for idx, env_out in enumerate(env_outputs):
             if self.done_mask[idx]:
+                # For done agents, use empty prompt
+                llm_input_texts.append("")
                 continue
                 
             agent = self.agents[idx]
             
-            # Agent handles history updates internally
-            self.env_outs[idx] = agent.get_env_outputs(reply)
-            self.done_mask[idx] = self.env_outs[idx].done
+            # Each agent returns messages format
+            messages = agent.get_llm_prompts(env_out)
+            
+            # Apply chat template to convert messages to text
+            prompt_str = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            
+            # Add answer format prompt
+            enable_think = getattr(self.cfg.agent, 'enable_think', False)
+            if enable_think:
+                prompt_str += "<think>"  # Force LLM to think before answering
+            else:
+                prompt_str += "<answer>"  # Force LLM to answer
+            
+            llm_input_texts.append(prompt_str)
+        
+        # Tokenize all prompts at once
+        inputs = self.tokenizer(
+            llm_input_texts,
+            return_tensors="pt",
+            padding=True,
+            padding_side="left",
+            truncation=False
+        )
+        
+        input_ids, attention_mask = inputs.input_ids, inputs.attention_mask
+        
+        # Compute position ids
+        from verl.utils.model import compute_position_id_with_mask
+        position_ids = compute_position_id_with_mask(attention_mask)
+        
+        # Create DataProto
+        batch_dict = {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "position_ids": position_ids,
+            "responses": input_ids[:, 1:],  # Remove the first token
+        }
+        
+        return DataProto.from_single_dict(batch_dict)
+
+
 
     # ─────────────────── MAIN ROLLOUT LOOP ───────────────────
     def rollout(self):
         """
-        Method 6: Iterate cfg.agent.max_turn turns, breaking early if all done;
-        glue helpers 3→4→5. Returns final self.env_outs.
+        Main rollout loop using batch LLM prompts approach.
+        Iterate cfg.agent.max_turn turns, breaking early if all done.
         """
         for turn in range(self.cfg.agent.max_turn):
             if self.done_mask.all():
                 break
 
-            # Collect prompts from active agents
-            prompts, idx_map = self._collect_prompts()
-            if prompts is None:
-                break
-
-            # Generate responses
-            replies = self._dispatch(prompts)
+            # Generate batch of LLM prompts from current env outputs
+            batch_prompts = self.get_batch_llm_prompts(self.env_outs)
             
-            # Apply responses back to agents
-            self.update_env_outputs(replies, idx_map)
+            # Generate responses using batch dispatch
+            lm_outputs = self.actor_wg.generate_sequences(batch_prompts)
+            
+            # Decode responses
+            replies = self.tokenizer.batch_decode(
+                lm_outputs.batch["responses"], 
+                skip_special_tokens=True
+            )
+            
+            # Update environment outputs for all agents
+            for idx, reply in enumerate(replies):
+                if self.done_mask[idx]:
+                    continue
+                    
+                agent = self.agents[idx]
+                # Agent handles history updates internally
+                self.env_outs[idx] = agent.get_env_outputs(reply)
+                self.done_mask[idx] = self.env_outs[idx].done
 
             #TODO: Early stopping. If max_actions_all_turns is reached or env is done, break.
             
