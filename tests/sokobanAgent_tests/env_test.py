@@ -56,8 +56,9 @@ def get_default_config():
         with open(config_path, 'r') as f:
             yaml_config = yaml.safe_load(f)
         
-        # Extract sokobanEnv configuration
-        sokoban_env_config = yaml_config.get('sokobanEnv', {})
+        # Extract sokobanAgent configuration with new nested format
+        sokoban_config = yaml_config.get('sokobanAgent', {})
+        sokoban_env_config = sokoban_config.get('env_config', {})
         
         # Convert dim_room from list to tuple if needed
         if 'dim_room' in sokoban_env_config:
