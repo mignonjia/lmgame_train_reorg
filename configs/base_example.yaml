@@ -1,26 +1,14 @@
-# Base configuration for PPO training with Sokoban agents
-# This configuration follows the hydra structure with defaults and overrides
-# ------ Setup Config ------
-
 defaults:
-  - agents
   - ppo_trainer
+  - envs
 
 system:
-  CUDA_VISIBLE_DEVICES: "0"
-
-# ------ Multi-turn RL Config ------
-
-agent_batch_size: 4
-agent_group_size: 2
-train: [sokobanAgent]
-validation: [sokobanAgent]
+  CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
 
 micro_batch_size_per_gpu: 4
 ppo_mini_batch_size: 32
-model_path: Qwen/Qwen2.5-0.5B
+model_path: Qwen/Qwen2.5-7B-Instruct
 
-# ------ PPO_trainer Override Config ------
 actor_rollout_ref:
   model:
     path: ${model_path}
@@ -92,3 +80,38 @@ trainer:
     val: 20
   logger: [ 'console', 'wandb' ] # 
   val_only: True
+
+agent_proxy:
+  max_turn: 20
+  action_sep: "||"
+  max_actions_per_turn: 5 # how many actions can be output at most in a single turn
+  use_turn_scores: False # important to GAE when applying token-level rewards to token-level advantages. If False, will take the sum of scores as the reward for the last turn.
+  enable_think: True # False -> no think RL
+  reward_normalization:
+    grouping: "state" # state / batch / inductive
+    method: "identity" # asym_clip / identity / mean_std
+
+es_manager:
+  format_penalty: -0.1
+  train:
+    env_groups: 8
+    # under the same group, the env config and env seed are ensured to be equal
+    group_size: 16
+    env_configs:
+      tags: ["SimpleSokoban"]
+      n_groups: [8] # If not set, all env names divide nums equally. Under the same group, the env config and env seed (prompt) are equal in each generation
+  val:
+    env_groups: 1692
+    group_size: 1 # should be set to 1 because val temperature is set to 0 and same prompt leads to same output
+    env_configs:
+      tags: ["SimpleSokoban", "GSM8K", "GSM8K_Turn_5", "GSM8K_NoThink", "GSM8K_NoThink_Turn_5", "Blocksworld3_Text", "Tetris"]
+      n_groups: [256, 256, 256, 256, 256, 156, 256] # If not set, all env names divide nums equally. Under the same group, the env config and env seed (prompt) are equal in each generation
+
+ctx_manager:
+  generation: # go to vllm
+    gen_config:
+      response_length: ${actor_rollout_ref.rollout.response_length}
+      temperature: ${actor_rollout_ref.rollout.temperature}
+      top_p: ${actor_rollout_ref.rollout.top_p}
+      top_k: ${actor_rollout_ref.rollout.top_k}
+      kwargs: null
