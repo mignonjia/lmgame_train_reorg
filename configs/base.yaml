@@ -1,10 +1,176 @@
-# ------ Training and Validation Tasks ------
+# Base configuration for PPO training with Sokoban agents
+# This configuration follows the hydra structure with defaults and overrides
+
+defaults:
+  - ppo_trainer # symbolic link to verl/verl/trainer/config/ppo_trainer.yaml
+  - agents # load agent configurations
+
+# System environment variables
+system:
+  CUDA_VISIBLE_DEVICES: "0"
+
+# Random seeds for reproducibility
+seed:
+  train: 10000
+  val: 123
+
+# ------ Core Training Parameters ------
 agent_batch_size: 4
 agent_group_size: 2
 train: [sokobanAgent]
 validation: [sokobanAgent]
 
-# ------ PPO Trainer Overrides ------
+# Batch size configurations
+micro_batch_size_per_gpu: 1
+ppo_mini_batch_size: 32
+
+# Model configuration
+model_path: Qwen/Qwen2.5-0.5B-Instruct
+
+# Response mask and stability settings
+enable_response_mask: True # Enabling response mask could improve stability of rollout/old_log_prob
+grpo_advantage_length_weight: False # Enable to encourage reasoning and forbid collapse
+
+# LoRA configuration
+lora:
+  rank: 0
+  alpha: 16
+  target_modules: all-linear
+
+# ------ Actor, Rollout, and Reference Model Configuration ------
+actor_rollout_ref:
+  model:
+    path: ${model_path}
+    lora_rank: ${lora.rank}
+    lora_alpha: ${lora.alpha}
+    target_modules: ${lora.target_modules}
+  
+  actor:
+    ppo_mini_batch_size: ${ppo_mini_batch_size}
+    micro_batch_size_per_gpu: ${micro_batch_size_per_gpu}
+    ppo_micro_batch_size_per_gpu: ${micro_batch_size_per_gpu}
+    use_ref: True
+    entropy_coeff: 0.001
+    use_kl_loss: False
+    kl_loss_coef: 0.000
+    kl_loss_type: kl
+    clip_ratio_low: 0.2
+    clip_ratio_high: 0.28
+    grpo_advantage_length_weight: ${grpo_advantage_length_weight}
+    optim:
+      betas: [0.9, 0.999]
+  
+  ref:
+    log_prob_micro_batch_size_per_gpu: ${micro_batch_size_per_gpu}
+  
+  rollout:
+    log_prob_micro_batch_size_per_gpu: ${micro_batch_size_per_gpu}
+    tensor_model_parallel_size: 1
+    max_model_len: 3600
+    prompt_length: 1024 # max prompt length from sync_multi_turn_rollout.py
+    response_length: 400 # single-turn response length
+    gpu_memory_utilization: 0.5
+    max_num_batched_tokens: 8192
+    temperature: 1
+    rollout_filter_ratio: 0.25
+    rollout_filter_type: std
+    enforce_eager: True
+    free_cache_engine: True
+    val_kwargs:
+      do_sample: True
+      temperature: 0.5
+    tp_size_check: true
+
+# ------ Critic Configuration ------
+critic:
+  ppo_mini_batch_size: ${ppo_mini_batch_size}
+  ppo_micro_batch_size_per_gpu: ${micro_batch_size_per_gpu}
+  model:
+    path: ${model_path}
+    lora_rank: ${lora.rank}
+    lora_alpha: ${lora.alpha}
+    target_modules: ${lora.target_modules}
+  optim:
+    betas: [0.9, 0.999]
+
+# ------ Data Configuration ------
+data:
+  max_prompt_length: 2048 # from sync_multi_turn_rollout.py
+  max_response_length: 512
+  train_batch_size: 128 # agent_batch_size * some multiplier
+
+# ------ Algorithm Configuration ------
+algorithm:
+  gamma: 1.0
+  lam: 1.0
+  high_level_gamma: 0.95
+  adv_estimator: gae
+  bi_level_gae: False
+  kl_penalty: kl
+  kl_ctrl:
+    type: fixed
+    kl_coef: 0.000
+
+# ------ Trainer Configuration ------
+trainer:
+  project_name: sokoban_ppo_training
+  experiment_name: sokoban_multi_turn
+  total_training_steps: 200
+  validation_steps: 1
+  val_before_train: True
+  n_gpus_per_node: 1
+  test_freq: 10
+  generations_to_log_to_wandb:
+    train: 128
+    val: 20
+  logger: ['console', 'wandb']
+
+# ------ Agent Proxy Configuration ------
+agent_proxy:
+  max_context_window: -1 # set > 0 to enable context window for long trajectory
+  max_turn: 5 # matches agents.yaml max_turns
+  action_sep: "||" # matches agent action separator
+  max_actions_per_turn: 5
+  use_turn_scores: False # important for GAE with token-level rewards
+  enable_think: False # matches agents.yaml enable_think default
+  reward_normalization:
+    grouping: "state" # state / batch / inductive
+    method: "identity" # asym_clip / identity / mean_std
+
+# ------ Environment and Agent Management ------
+es_manager:
+  format_penalty: -0.1 # matches agents.yaml format_penalty
+  train:
+    env_groups: 2 # agent_batch_size / agent_group_size
+    group_size: 2 # matches agent_group_size
+    env_configs:
+      tags: ["sokobanAgent"]
+      n_groups: [2]
+  val:
+    env_groups: 4
+    group_size: 1 # should be 1 for validation to avoid repetitive prompts
+    env_configs:
+      tags: ["sokobanAgent"]
+      n_groups: [4]
+
+# ------ Context Manager Configuration ------
+ctx_manager:
+  generation:
+    gen_config:
+      response_length: ${actor_rollout_ref.rollout.response_length}
+      temperature: ${actor_rollout_ref.rollout.temperature}
+      top_p: ${actor_rollout_ref.rollout.top_p}
+      top_k: ${actor_rollout_ref.rollout.top_k}
+      kwargs: null
+
+# ------ Agent-specific configurations (from agents.yaml) ------
+agent:
+  max_turn: 5 # matches sokobanAgent max_turns
+  enable_think: False # matches sokobanAgent default
+  max_actions_all_turns: 10 # from sokobanAgent config
+  max_prompt_length: 2048 # for tokenization
+  truncation: 'right' # for prompt truncation
+  use_turn_scores: False # for reward processing
 
 
 

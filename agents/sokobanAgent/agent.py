@@ -42,15 +42,8 @@ class SokobanAgent:
             self.seed = seed
         
         # Handle both old and new config formats
-        if 'sokobanAgent' in config:
-            # New nested format
-            sokoban_config = config['sokobanAgent']
-            self.agent_config = sokoban_config.get('agent_config', {})
-            self.env_config = sokoban_config.get('env_config', {})
-        else:
-            # Old flat format (backward compatibility)
-            self.agent_config = config
-            self.env_config = config
+        self.agent_config = config['agent_config']
+        self.env_config = config['env_config']
 
         self.max_turns = self.agent_config.get('max_turns', 5)
         self.max_actions_all_turns = self.agent_config.get('max_actions_all_turns', 10)

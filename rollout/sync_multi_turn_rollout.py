@@ -59,12 +59,7 @@ class SyncMultiTurnRollout:
         
         # Extract agent configuration from agents.yaml format
         # The config should contain the agent configuration under the agent name
-        if hasattr(self.cfg, agent_name):
-            self.agent_config = getattr(self.cfg, agent_name)
-        elif agent_name in self.cfg:
-            self.agent_config = self.cfg[agent_name]
-        else:
-            raise ValueError(f"Agent configuration for '{agent_name}' not found in config")
+        self.agent_config = self.cfg[agent_name]
 
     def _init_batch_agents(self):
         """
@@ -155,10 +150,10 @@ class SyncMultiTurnRollout:
             input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(
                 prompt=prompt_str,
                 tokenizer=self.tokenizer,
-                max_length=getattr(self.cfg, 'max_prompt_length', 2048),
+                max_length=getattr(self.cfg.data, 'max_prompt_length', 2048),
                 pad_token_id=self.tokenizer.pad_token_id,
                 left_pad=True,  # Left pad for batch generation
-                truncation=getattr(self.cfg, 'truncation', 'right')
+                truncation=getattr(self.cfg.agent, 'truncation', 'right')
             )
             
             # Compute position ids
@@ -194,7 +189,7 @@ class SyncMultiTurnRollout:
             lm_outputs.batch["responses"], 
             skip_special_tokens=True
         )
-        
+
         # Update environment outputs for all agents
         updated_env_outs = []
         

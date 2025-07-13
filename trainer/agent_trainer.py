@@ -4,6 +4,8 @@ import torch
 import numpy as np
 import uuid
 from copy import deepcopy
+from pprint import pprint
+from tqdm import tqdm
 
 # Import from verl
 from verl import DataProto
@@ -129,11 +131,12 @@ class AgentTrainer(RayPPOTrainer):
             self.init_multi_turn_rollout()
         
         # Run multi-turn rollout to get complete trajectories
+        assert self.multi_turn_rollout is not None  # Type narrowing for linter
         final_env_outs = self.multi_turn_rollout.rollout()
         
         # Build update batch containing full trajectories and rewards
         # This already returns a complete DataProto with all necessary fields
-        rollout_batch = self.multi_turn_rollout.build_update_batch()
+        rollout_batch = self.multi_turn_rollout.build_ppo_batch()
         
         # Return the complete DataProto directly - no need to rebuild it
         return rollout_batch
@@ -420,3 +423,123 @@ class AgentTrainer(RayPPOTrainer):
                     pprint(f"Final validation metrics: {last_val_metrics}")
                     progress_bar.close()
                     return
+
+    def _validate(self):
+        """
+        Validation method for AgentTrainer using multi-turn rollouts.
+        Modified from original RayPPOTrainer._validate() to use SyncMultiTurnRollout.
+        """
+        from collections import defaultdict
+        
+        data_source_lst = []
+        reward_extra_infos_dict: dict[str, list] = defaultdict(list)
+
+        # Lists to collect samples for the table
+        sample_inputs = []
+        sample_outputs = []
+        sample_scores = []
+
+        # ─────────────────── MODIFICATION: Use agent-based validation ───────────────────
+        env_metric_dict = {}
+        for step in range(self.config.trainer.validation_steps):
+            # Store original inputs (empty for agent-based validation)
+            input_texts = ["" for _ in range(self.config.es_manager.val.env_groups * self.config.es_manager.val.group_size)]
+            sample_inputs.extend(input_texts)
+            
+            meta_info = {
+                "eos_token_id": self.tokenizer.eos_token_id,
+                "pad_token_id": self.tokenizer.pad_token_id,
+                "recompute_log_prob": False,
+                "do_sample": self.config.actor_rollout_ref.rollout.val_kwargs.do_sample,
+                "validate": True,
+            }
+            test_gen_batch = DataProto(batch=None, non_tensor_batch=None, meta_info=meta_info)
+            print(f"test_gen_batch meta info: {test_gen_batch.meta_info}")
+
+            # ─────────────────── MODIFICATION: Use multi-turn rollout instead of single generation ───────────────────
+            import time
+            start_time = time.time()
+            
+            # Initialize multi-turn rollout if not already done
+            if self.multi_turn_rollout is None:
+                self.init_multi_turn_rollout()
+            
+            # Run multi-turn rollout for validation
+            final_env_outs = self.multi_turn_rollout.rollout()
+            test_batch = self.multi_turn_rollout.build_ppo_batch()
+            
+            end_time = time.time()
+            print(f"validation generation time: {end_time - start_time} seconds")
+            
+            # Collect environment metrics from rollout
+            for key, value in test_batch.meta_info["metrics"].items():
+                if "val-env/" + key not in env_metric_dict:
+                    env_metric_dict["val-env/" + key] = []
+                env_metric_dict["val-env/" + key].append(value)
+
+            # Store generated outputs
+            output_ids = test_batch.batch["responses"]
+            output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
+            sample_outputs.extend(output_texts)
+
+            # ─────────────────── ORIGINAL: Evaluate using reward function ───────────────────
+            # evaluate using reward_function
+            result = self.val_reward_fn(test_batch, return_dict=True)
+            reward_tensor = result["reward_tensor"]
+            scores = reward_tensor.sum(-1).cpu().tolist()
+            sample_scores.extend(scores)
+
+            reward_extra_infos_dict["reward"].extend(scores)
+            if "reward_extra_info" in result:
+                for key, lst in result["reward_extra_info"].items():
+                    reward_extra_infos_dict[key].extend(lst)
+
+            data_source_lst.append(test_batch.non_tensor_batch.get("data_source", ["unknown"] * reward_tensor.shape[0]))
+
+        # ─────────────────── ORIGINAL: Log and dump generations ───────────────────
+        self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
+
+        # dump generations
+        val_data_dir = self.config.trainer.get("validation_data_dir", None)
+        if val_data_dir:
+            self._dump_generations(
+                inputs=sample_inputs,
+                outputs=sample_outputs,
+                scores=sample_scores,
+                reward_extra_infos_dict=reward_extra_infos_dict,
+                dump_path=val_data_dir,
+            )
+
+        for key_info, lst in reward_extra_infos_dict.items():
+            assert len(lst) == 0 or len(lst) == len(sample_scores), f"{key_info}: {len(lst)=}, {len(sample_scores)=}"
+
+        data_sources = np.concatenate(data_source_lst, axis=0)
+
+        # ─────────────────── MODIFICATION: Process validation metrics with env metrics ───────────────────
+        try:
+            from verl.trainer.ppo.metric_utils import process_validation_metrics
+            from verl.utils.metric import reduce_metrics
+        except ImportError:
+            # Fallback implementations if verl is not available
+            def process_validation_metrics(data_sources, sample_inputs, reward_extra_infos_dict):
+                return {"unknown": {"reward": {"mean@1": np.mean(reward_extra_infos_dict.get("reward", [0]))}}}
+            
+            def reduce_metrics(metrics_dict):
+                return {k: np.mean(v) if isinstance(v, list) else v for k, v in metrics_dict.items()}
+        
+        data_src2var2metric2val = process_validation_metrics(data_sources, sample_inputs, reward_extra_infos_dict)
+        metric_dict = reduce_metrics(env_metric_dict)
+
+        for data_source, var2metric2val in data_src2var2metric2val.items():
+            core_var = "acc" if "acc" in var2metric2val else "reward"
+            for var_name, metric2val in var2metric2val.items():
+                n_max = max([int(name.split("@")[-1].split("/")[0]) for name in metric2val.keys()])
+                for metric_name, metric_val in metric2val.items():
+                    if (var_name == core_var) and any(metric_name.startswith(pfx) for pfx in ["mean", "maj", "best"]) and (f"@{n_max}" in metric_name):
+                        metric_sec = "val-core"
+                    else:
+                        metric_sec = "val-aux"
+                    pfx = f"{metric_sec}/{data_source}/{var_name}/{metric_name}"
+                    metric_dict[pfx] = metric_val
+
+        return metric_dict
