@@ -39,8 +39,7 @@ class SyncMultiTurnRollout:
         
         # Initialize agent configuration from config
         self._setup_agent_config()
-        
-        # Initialize agents and tracking structures
+
         self._init_batch_agents()
         
         # Global turn counter
@@ -89,7 +88,6 @@ class SyncMultiTurnRollout:
         print(f"Creating {self.n_agents} agents in {num_groups} groups of size {agent_group_size}")
         
         self.agents = []
-        initial_env_outs = []
         
         for idx in range(self.n_agents):
             # Calculate group_id for this agent
@@ -106,12 +104,11 @@ class SyncMultiTurnRollout:
             initial_env_out = agent.reset()
             
             self.agents.append(agent)
-            initial_env_outs.append(initial_env_out)
+           
             print(f"  Agent {idx}: group_id={group_id}, initial_state_preview={initial_env_out.state[:20]}...")
         
         # Initialize tracking structures with batch of reset outputs
         self.done_mask = torch.zeros(self.n_agents, dtype=torch.bool)
-        self.env_outs = initial_env_outs
 
     # ─────────────────── BATCH LLM PROMPTS ───────────────────
     def get_batch_llm_prompts(self, env_outputs):
@@ -183,6 +180,8 @@ class SyncMultiTurnRollout:
         Main rollout loop using batch LLM prompts approach.
         Iterate cfg.agent.max_turn turns, breaking early if all done.
         """
+        self._reset_batch_agents()
+        
         for turn in range(self.cfg.agent.max_turn):
             if self.done_mask.all():
                 break
@@ -353,22 +352,35 @@ class SyncMultiTurnRollout:
         return batched_dataproto
 
     # ─────────────────── LIFECYCLE MANAGEMENT ───────────────────
+
+    def _reset_batch_agents(self):
+        """
+        Reset all agents and collect the batch of initial env outputs.
+        This function resets the rollout manager for new epoch/rollout.
+        """
+        initial_env_outs = []
+        
+        for idx in range(self.n_agents):
+            agent = self.agents[idx]
+            
+            # Reset agent and collect initial environment output
+            initial_env_out = agent.reset()
+            initial_env_outs.append(initial_env_out)
+            
+            print(f"  Reset Agent {idx}: initial_state_preview={initial_env_out.state[:20]}...")
+        
+        # Update tracking structures with batch of reset outputs
+        self.done_mask = torch.zeros(self.n_agents, dtype=torch.bool)
+        self.env_outs = initial_env_outs
+        self.step_cnt = 0
+
+        
     def reset(self):
         """
-        If your trainer calls it between epochs,
-        loop over agents, agent.reset(), refresh masks/obs.
-        Only needed if the outer loop expects it.
+        Public reset method for external use (e.g., called by trainer between epochs).
+        Delegates to _reset_batch_agents() for actual reset logic.
         """
-        for idx in range(self.n_agents):
-            self.agents[idx].reset()
-        
-        # Reset tracking structures
-        self.done_mask = torch.zeros(self.n_agents, dtype=torch.bool)
-        self.env_outs = [
-            self.agents[idx].get_initial_env_outputs() 
-            for idx in range(self.n_agents)
-        ]
-        self.step_cnt = 0
+        self._reset_batch_agents()
 
     def close(self):
         """
