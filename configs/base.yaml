@@ -2,8 +2,8 @@
 # This configuration follows the hydra structure with defaults and overrides
 
 defaults:
-  - ppo_trainer # symbolic link to verl/verl/trainer/config/ppo_trainer.yaml
   - agents # load agent configurations
+  - ppo_trainer # symbolic link to verl/verl/trainer/config/ppo_trainer.yaml
 
 # System environment variables
 system:
