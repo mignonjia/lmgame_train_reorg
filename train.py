@@ -25,9 +25,12 @@ from omegaconf import OmegaConf
 from trainer.agent_trainer import AgentTrainer
 from verl.trainer.ppo.reward import load_reward_manager
 
+def 
+
 
 @hydra.main(config_path="configs", config_name="ppo_trainer", version_base=None)
 def main(config):
+    print(f"config: {config}")
     run_ppo(config)
 
 

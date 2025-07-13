@@ -1,24 +1,29 @@
 # Base configuration for PPO training with Sokoban agents
 # This configuration follows the hydra structure with defaults and overrides
-# ------ Setup Config ------
+# ------ Custom Training Config------
 
 defaults:
   - agents
   - ppo_trainer
 
 system:
-  CUDA_VISIBLE_DEVICES: "0"
+  CUDA_VISIBLE_DEVICES: 0
 
-# ------ Multi-turn RL Config ------
+rollout:
+  agent_batch_size: 4
+  agent_group_size: 2
+  train: [sokobanAgent]
+  validation: [sokobanAgent]
 
-agent_batch_size: 4
-agent_group_size: 2
-train: [sokobanAgent]
-validation: [sokobanAgent]
-
+train_batch_size: 128
 micro_batch_size_per_gpu: 4
+ppo_micro_batch_size_per_gpu: 4
 ppo_mini_batch_size: 32
+total_training_steps: 200
+n_gpus_per_node: 1
 model_path: Qwen/Qwen2.5-0.5B
+project_name: lmgame
+experiment_name: sokoban_train_example
 
 # ------ PPO_trainer Override Config ------
 actor_rollout_ref:
@@ -67,7 +72,7 @@ critic:
 data:
   max_prompt_length: null
   max_response_length: null
-  train_batch_size: null
+  train_batch_size: ${train_batch_size}
 
 algorithm:
   gamma: 1.0
@@ -81,14 +86,14 @@ algorithm:
 
 trainer:
   project_name: lmgame
-  experiment_name: train_mix
-  total_training_steps: 1
+  experiment_name: sokoban_train_example
+  total_training_steps: ${total_training_steps}
   validation_steps: 1 # validation instances = validation_steps * val_env_groups * group_size
   val_before_train: True
-  n_gpus_per_node: 8
+  n_gpus_per_node: ${n_gpus_per_node}
   test_freq: 10
   generations_to_log_to_wandb: 
     train: 128 # TODO: will be implemented
     val: 20
   logger: [ 'console', 'wandb' ] # 
-  val_only: True
+  val_only: False
