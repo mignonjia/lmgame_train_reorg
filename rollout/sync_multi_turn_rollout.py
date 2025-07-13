@@ -147,32 +147,104 @@ class SyncMultiTurnRollout:
             
             llm_input_texts.append(prompt_str)
         
-        # Tokenize all prompts at once
-        inputs = self.tokenizer(
-            llm_input_texts,
-            return_tensors="pt",
-            padding=True,
-            padding_side="left",
-            truncation=False
-        )
+        # Tokenize all prompts using verl_F for more universal processing
+        batch_list = []
         
-        input_ids, attention_mask = inputs.input_ids, inputs.attention_mask
+        for prompt_str in llm_input_texts:
+            # Use verl_F.tokenize_and_postprocess_data for consistent processing
+            input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(
+                prompt=prompt_str,
+                tokenizer=self.tokenizer,
+                max_length=getattr(self.cfg, 'max_prompt_length', 2048),
+                pad_token_id=self.tokenizer.pad_token_id,
+                left_pad=True,  # Left pad for batch generation
+                truncation=getattr(self.cfg, 'truncation', 'right')
+            )
+            
+            # Compute position ids
+            from verl.utils.model import compute_position_id_with_mask
+            position_ids = compute_position_id_with_mask(attention_mask)
+            
+            # Build row_dict for each prompt
+            row_dict = {
+                'input_ids': input_ids.squeeze(0),  # Remove batch dimension
+                'attention_mask': attention_mask.squeeze(0),
+                'position_ids': position_ids.squeeze(0),
+                'responses': input_ids.squeeze(0)[1:],  # Remove first token for responses
+            }
+            batch_list.append(row_dict)
         
-        # Compute position ids
-        from verl.utils.model import compute_position_id_with_mask
-        position_ids = compute_position_id_with_mask(attention_mask)
-        
-        # Create DataProto
-        batch_dict = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "position_ids": position_ids,
-            "responses": input_ids[:, 1:],  # Remove the first token
-        }
-        
+        # Use collate_fn to batch the data, then convert to DataProto
+        batch_dict = collate_fn(batch_list)
         return DataProto.from_single_dict(batch_dict)
 
+    # ─────────────────── BATCH ENV OUTPUTS ───────────────────
+    def get_batch_env_outputs(self, lm_outputs):
+        """
+        Process LLM outputs and update environment outputs for all agents.
+        
+        Args:
+            lm_outputs: DataProto containing LLM responses
+            
+        Returns:
+            List: Updated environment outputs from all agents
+        """
+        # Decode responses
+        replies = self.tokenizer.batch_decode(
+            lm_outputs.batch["responses"], 
+            skip_special_tokens=True
+        )
+        
+        # Update environment outputs for all agents
+        updated_env_outs = []
+        
+        for idx, reply in enumerate(replies):
+            if self.done_mask[idx]:
+                # Keep existing env output for done agents
+                updated_env_outs.append(self.env_outs[idx])
+                continue
+                
+            agent = self.agents[idx]
+            # Agent handles history updates internally
+            env_out = agent.get_env_outputs(reply)
+            updated_env_outs.append(env_out)
+            
+            # Update tracking structures
+            self.env_outs[idx] = env_out
+            self.done_mask[idx] = env_out.done
+        
+        return updated_env_outs
 
+    # ─────────────────── LLM GENERATION ───────────────────
+    def generate_sequences(self, lm_inputs: DataProto):
+        """
+        Generate sequences using the actor worker group.
+        
+        Args:
+            lm_inputs: DataProto containing input_ids, attention_mask, position_ids
+            
+        Returns:
+            DataProto: Generated sequences
+        """
+        # TODO: add kv cache both for the vllm wrapper here and for verl vllm.
+        try:
+            from verl.trainer.ppo.ray_trainer import RayWorkerGroup
+            from verl.utils.dataset.rl_dataset import pad_dataproto_to_divisor, unpad_dataproto
+        except ImportError:
+            RayWorkerGroup = None
+            pad_dataproto_to_divisor = None
+            unpad_dataproto = None
+        
+        if RayWorkerGroup is not None and isinstance(self.actor_wg, RayWorkerGroup):
+            padded_lm_inputs, pad_size = pad_dataproto_to_divisor(lm_inputs, self.actor_wg.world_size)
+            padded_lm_outputs = self.actor_wg.generate_sequences(padded_lm_inputs)
+            lm_outputs = unpad_dataproto(padded_lm_outputs, pad_size=pad_size)
+            lm_outputs.meta_info = lm_inputs.meta_info
+            lm_outputs.non_tensor_batch = lm_inputs.non_tensor_batch
+        else:
+            lm_outputs = self.actor_wg.generate_sequences(lm_inputs)
+        
+        return lm_outputs
 
     # ─────────────────── MAIN ROLLOUT LOOP ───────────────────
     def rollout(self):
@@ -190,23 +262,10 @@ class SyncMultiTurnRollout:
             batch_prompts = self.get_batch_llm_prompts(self.env_outs)
             
             # Generate responses using batch dispatch
-            lm_outputs = self.actor_wg.generate_sequences(batch_prompts)
+            lm_outputs = self.generate_sequences(batch_prompts)
             
-            # Decode responses
-            replies = self.tokenizer.batch_decode(
-                lm_outputs.batch["responses"], 
-                skip_special_tokens=True
-            )
-            
-            # Update environment outputs for all agents
-            for idx, reply in enumerate(replies):
-                if self.done_mask[idx]:
-                    continue
-                    
-                agent = self.agents[idx]
-                # Agent handles history updates internally
-                self.env_outs[idx] = agent.get_env_outputs(reply)
-                self.done_mask[idx] = self.env_outs[idx].done
+            # Process LLM outputs and update environment outputs
+            self.env_outs = self.get_batch_env_outputs(lm_outputs)
 
             #TODO: Early stopping. If max_actions_all_turns is reached or env is done, break.
             
@@ -215,141 +274,139 @@ class SyncMultiTurnRollout:
         return self.env_outs
 
     # ─────────────────── PPO BATCH BUILDING ───────────────────
-    def _collect_final_rollout_states(self):
+    def _collect_final_rollout_states(self) -> List[Dict]:
         """
         Collect final rollout states from all agents.
-        Each agent.get_final_rollout_states() returns a row_dict with trajectory data.
         
         Returns:
-            row_dicts: List[Dict] - List of row dictionaries from agents
+            List[Dict]: List of rollout state dictionaries from all agents
         """
-        row_dicts = []
-        
+        env_outputs = []
         for idx in range(self.n_agents):
             agent = self.agents[idx]
-            
-            # Each agent returns a complete row_dict with trajectory data
-            row_dict = agent.get_final_rollout_states()
-            row_dicts.append(row_dict)
-        
-        return row_dicts
+            rollout_state = agent.get_final_rollout_states()
+            env_outputs.append(rollout_state)
+        return env_outputs
 
-    def _convert_rollout_states_to_dataproto(self, row_dicts: List[Dict]):
+    def build_ppo_batch(self) -> DataProto:
         """
-        Convert a batch of rollout state dictionaries to DataProto.
-        Following the same pattern as _convert_prompts_to_dataproto.
-        Handles text-based rollout states from agents.
-        
-        Args:
-            row_dicts: List[Dict] - List of row dictionaries containing trajectory data
-                Each row_dict contains text fields that need tokenization
-            
-        Returns:
-            DataProto: Batched DataProto containing all trajectory information
+        Build PPO batch from the final batch rollout states.
+        Converts collected rollout states to DataProto format for PPO training.
         """
-        batch_list = []
+        # Step 1: Collect final rollout states from all agents
+        env_outputs = self._collect_final_rollout_states()
         
-        for row_dict in row_dicts:
-            # Create tokenized row_dict for each rollout state
-            tokenized_row_dict = {}
+        # Step 2: Convert to DataProto format (similar to get_lm_inputs with prepare_for_update=True)
+        llm_input_texts = []
+        messages_list = []
+        
+        for env_output in env_outputs:
+            # Build messages from trajectory history
+            system_prompt = self.agent_config.get('system_prompt', "You are a helpful AI assistant that solves Sokoban puzzles step by step.")
+            prompt = self.agent_config.get('prompt', "You are solving the Sokoban puzzle.")
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ]
             
-            # Handle the main conversation text (full trajectory)
-            conversation_text = row_dict.get('conversation_history', row_dict.get('full_text', ''))
-            if conversation_text:
-                # Tokenize full conversation
-                input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(
-                    prompt=conversation_text,
-                    tokenizer=self.tokenizer,
-                    max_length=getattr(self.cfg, 'max_trajectory_length', 2048),
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    left_pad=False,
-                    truncation=getattr(self.cfg, 'truncation', 'right')
-                )
+            # Process each turn in the history
+            for idx, content in enumerate(env_output["history"]):
+                messages[-1]["content"] += f"\nTurn {idx + 1}:\n"
                 
-                # Compute position ids
-                from verl.utils.model import compute_position_id_with_mask
-                position_ids = compute_position_id_with_mask(attention_mask)
+                if "state" in content:
+                    enable_think = getattr(self.cfg.agent, 'enable_think', False)
+                    FORMAT_PROMPT = "<think> [Your thoughts] </think> <answer> [your answer] </answer>" if enable_think else "<answer> [your answer] </answer>"
+                    messages[-1]["content"] += f"State:\n{content['state']}\nYou have {content['actions_left']} actions left. Always output: {FORMAT_PROMPT} with no extra text. Strictly follow this format.\n"
                 
-                # Add core sequence data
-                tokenized_row_dict['input_ids'] = input_ids.squeeze(0)
-                tokenized_row_dict['attention_mask'] = attention_mask.squeeze(0)
-                tokenized_row_dict['position_ids'] = position_ids.squeeze(0)
-                tokenized_row_dict['sequences'] = input_ids.squeeze(0)  # Alias
-                tokenized_row_dict['prompts'] = input_ids.squeeze(0)  # Alias
-            
-            # Handle final response text (for PPO log prob computation)
-            final_response = row_dict.get('final_response', row_dict.get('response_text', ''))
-            if final_response:
-                # Tokenize final response
-                response_ids, _ = verl_F.tokenize_and_postprocess_data(
-                    prompt=final_response,
-                    tokenizer=self.tokenizer,
-                    max_length=getattr(self.cfg, 'max_response_length', 512),
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    left_pad=False,
-                    truncation=getattr(self.cfg, 'truncation', 'right')
-                )
+                if "llm_response" in content:
+                    messages.append({"role": "assistant", "content": content["llm_response"]})
                 
-                tokenized_row_dict['responses'] = response_ids.squeeze(0)
+                if "reward" in content:
+                    messages.append({"role": "user", "content": f"Reward:\n{content['reward']}\n"})
             
-            # Handle reward and scoring data (already tensors/numbers)
-            for key in ['rm_scores', 'token_level_scores', 'reward', 'episode_reward']:
-                if key in row_dict:
-                    reward_value = row_dict[key]
-                    if isinstance(reward_value, (int, float)):
-                        # Convert scalar reward to token-level rewards
-                        if 'responses' in tokenized_row_dict:
-                            response_length = tokenized_row_dict['responses'].shape[0]
-                            token_rewards = torch.zeros(response_length, dtype=torch.float)
-                            token_rewards[-1] = reward_value  # Put reward at final token
-                            tokenized_row_dict['rm_scores'] = token_rewards
-                            tokenized_row_dict['token_level_scores'] = token_rewards
-                    else:
-                        # Already tensor format
-                        tokenized_row_dict[key] = reward_value
-            
-            # Handle loss mask and other tensor fields
-            for key in ['loss_mask', 'multi_turn_token_level_rewards', 'end_of_response_position_mask']:
-                if key in row_dict:
-                    tokenized_row_dict[key] = row_dict[key]
-            
-            # Handle metadata fields (non-tensor)
-            for key in ['env_id', 'group_id', 'uid', 'metrics', 'tag', 'correct_answer']:
-                if key in row_dict:
-                    tokenized_row_dict[key] = row_dict[key]
-            
-            # Create default loss_mask if not provided (1 for assistant tokens)
-            if 'loss_mask' not in tokenized_row_dict and 'attention_mask' in tokenized_row_dict:
-                # Simple heuristic: assume second half of sequence is assistant response
-                seq_len = tokenized_row_dict['attention_mask'].shape[0]
-                loss_mask = torch.zeros_like(tokenized_row_dict['attention_mask'])
-                if 'responses' in tokenized_row_dict:
-                    response_len = tokenized_row_dict['responses'].shape[0]
-                    loss_mask[-response_len:] = 1  # Mark response tokens for loss
-                tokenized_row_dict['loss_mask'] = loss_mask
-            
-            batch_list.append(tokenized_row_dict)
+            # Apply chat template
+            text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=False)
+            llm_input_texts.append(text)
+            messages_list.append(messages)
         
-        # Use collate_fn to batch the data, then convert to DataProto
-        batch_dict = collate_fn(batch_list)
-        return DataProto.from_single_dict(batch_dict)
-
-    def build_update_batch(self):
-        """
-        Main function that orchestrates the two-step process:
-        1. Collect final rollout states from all agents
-        2. Convert the batch of rollout states to DataProto
+        # Tokenize all texts
+        inputs = self.tokenizer(
+            llm_input_texts, 
+            return_tensors="pt", 
+            padding=True, 
+            padding_side="left", 
+            truncation=False
+        )
+        input_ids, attention_mask = inputs.input_ids, inputs.attention_mask
         
-        Returns:
-            DataProto: Batch containing complete trajectory data ready for PPO training
-        """
-        # Step 1: Collect final rollout states from agents
-        row_dicts = self._collect_final_rollout_states()
+        # Compute position ids
+        from verl.utils.model import compute_position_id_with_mask
+        position_ids = compute_position_id_with_mask(attention_mask)
         
-        # Step 2: Convert batch of rollout states to DataProto
-        batched_dataproto = self._convert_rollout_states_to_dataproto(row_dicts)
+        # Extract scores from trajectory history
+        scores = []
+        for env_output in env_outputs:
+            trajectory_scores = [entry.get('reward', 0.0) for entry in env_output['history']]
+            scores.append(trajectory_scores)
         
-        return batched_dataproto
+        # Get masks and scores (assuming this function exists in verl)
+        try:
+            from verl.utils.reward_score import get_masks_and_scores
+            score_tensor, loss_mask, response_mask = get_masks_and_scores(
+                input_ids, 
+                self.tokenizer, 
+                scores, 
+                use_turn_scores=getattr(self.cfg.agent, 'use_turn_scores', False),
+                enable_response_mask=getattr(self.cfg, 'enable_response_mask', True)
+            )
+        except ImportError:
+            # Fallback if function not available
+            score_tensor = torch.zeros_like(input_ids[:, 1:], dtype=torch.float)
+            loss_mask = torch.ones_like(input_ids[:, 1:], dtype=torch.float)
+            response_mask = torch.ones_like(input_ids[:, 1:], dtype=torch.float)
+        
+        # Build DataProto
+        llm_inputs = DataProto()
+        llm_inputs.batch = TensorDict({
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "position_ids": position_ids,
+            "responses": input_ids[:, 1:],  # remove the first token
+            "loss_mask": loss_mask,
+            "rm_scores": score_tensor,
+            "original_rm_scores": score_tensor,
+        }, batch_size=input_ids.shape[0])
+        
+        # Non-tensor batch data
+        llm_inputs.non_tensor_batch = {
+            "env_ids": np.array([env_output["env_id"] for env_output in env_outputs], dtype=object),
+            "group_ids": np.array([env_output["group_id"] for env_output in env_outputs], dtype=object),
+            "messages_list": np.array(messages_list, dtype=object),
+        }
+        
+        # Collect metrics
+        metrics = {}
+        for env_output in env_outputs:
+            for key, value in env_output["metrics"].items():
+                if key not in metrics:
+                    metrics[key] = []
+                metrics[key].append(value)
+        
+        # Calculate mean metrics
+        mean_metrics = {}
+        for key, values in metrics.items():
+            if isinstance(values, list):
+                mean_metrics[key] = np.mean(values)
+            else:
+                mean_metrics[key] = values
+        
+        # Add response length metric
+        if response_mask is not None:
+            mean_metrics["response_length"] = response_mask.sum(dim=-1).float().mean().item()
+        
+        llm_inputs.meta_info = {"metrics": mean_metrics}
+        
+        return llm_inputs
 
     # ─────────────────── LIFECYCLE MANAGEMENT ───────────────────
 
