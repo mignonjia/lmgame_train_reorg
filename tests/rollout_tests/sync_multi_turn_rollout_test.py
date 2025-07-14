@@ -165,7 +165,8 @@ def test_sync_multi_turn_rollout_creation():
     required_configs = {
         'max_prompt_length': 'cfg.max_prompt_length',
         'rollout.truncation': 'cfg.rollout.truncation',
-        'rollout.agent_batch_size': 'cfg.rollout.agent_batch_size',
+        'rollout.agent_group_num': 'cfg.rollout.agent_group_num',
+        'rollout.agent_group_size': 'cfg.rollout.agent_group_size',
         'rollout.train': 'cfg.rollout.train',
         'rollout.enable_think': 'cfg.rollout.enable_think',
         'rollout.use_turn_scores': 'cfg.rollout.use_turn_scores',
@@ -201,7 +202,7 @@ def test_sync_multi_turn_rollout_creation():
         print(f"         Keys: {list(rollout_config._original_dict.keys()) if hasattr(rollout_config, '_original_dict') else 'NO_DICT'}")
         
         # Check each rollout attribute
-        rollout_attrs = ['agent_batch_size', 'agent_group_size', 'train', 'validation', 'truncation', 'enable_think', 'use_turn_scores', 'enable_response_mask']
+        rollout_attrs = ['agent_group_num', 'agent_group_size', 'train', 'validation', 'truncation', 'enable_think', 'use_turn_scores', 'enable_response_mask']
         for attr in rollout_attrs:
             try:
                 value = getattr(rollout_config, attr)
@@ -238,7 +239,7 @@ def test_sync_multi_turn_rollout_creation():
     # Show what we have vs what we need
     print(f"\n      🔍 CONFIG AVAILABILITY SUMMARY:")
     print(f"         Available top-level keys: {list(config_obj._original_dict.keys()) if hasattr(config_obj, '_original_dict') else 'NONE'}")
-    print(f"         Need for rollout: max_prompt_length, rollout.truncation, rollout.agent_batch_size, etc.")
+    print(f"         Need for rollout: max_prompt_length, rollout.truncation, rollout.agent_group_num, rollout.agent_group_size, etc.")
     print(f"         Need for agents: sokobanAgent.agent_config.max_turns")
     
     # Create real tokenizer
@@ -259,12 +260,15 @@ def test_sync_multi_turn_rollout_creation():
     assert rollout.cfg == config_obj
     assert rollout.tokenizer == tokenizer
     assert rollout.actor_wg == mock_actor_wg
-    assert rollout.n_agents == config['rollout']['agent_batch_size']
-    assert len(rollout.agents) == config['rollout']['agent_batch_size']
+    
+    # Calculate expected number of agents from agent_group_num * agent_group_size
+    expected_n_agents = config['rollout']['agent_group_num'] * config['rollout']['agent_group_size']
+    assert rollout.n_agents == expected_n_agents
+    assert len(rollout.agents) == expected_n_agents
     assert rollout.step_cnt == 0
     
     print(f"✅ SyncMultiTurnRollout created successfully")
-    print(f"   Number of agents: {rollout.n_agents}")
+    print(f"   Number of agents: {rollout.n_agents} (calculated as {config['rollout']['agent_group_num']} groups × {config['rollout']['agent_group_size']} agents/group)")
     print(f"   Agent class: {rollout.agent_cls}")
     print(f"   Max turns: {rollout.max_turns}")
     print(f"   Step count: {rollout.step_cnt}")
