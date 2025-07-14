@@ -238,7 +238,7 @@ class AgentTrainer(RayPPOTrainer):
             rollout_batch.meta_info.update(filter_metrics)
         
         # Return the complete DataProto directly - no need to rebuild it
-        return rollout_batch
+        return rollout_batch, filter_metrics
 
     def fit(self):
         """
@@ -311,12 +311,13 @@ class AgentTrainer(RayPPOTrainer):
                     # generate a batch using multi-turn rollout
                     with marked_timer("gen", timing_raw, color="red"):
                         # Use multi-turn rollout instead of single-turn generation
-                        gen_batch_output = self._generate_multi_turn_sequences(gen_batch)
+                        batch, metrics = self._generate_multi_turn_sequences(batch)
+                        metrics.update({"train/" + key: value for key, value in batch.meta_info['metrics'].items()})
                         
                         # Handle timing info if present
-                        if "timing" in gen_batch_output.meta_info:
-                            timing_raw.update(gen_batch_output.meta_info["timing"])
-                            gen_batch_output.meta_info.pop("timing", None)
+                        if "timing" in batch.meta_info:
+                            timing_raw.update(batch.meta_info["timing"])
+                            batch.meta_info.pop("timing", None)
 
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         with marked_timer("gen_max", timing_raw, color="purple"):
@@ -334,18 +335,76 @@ class AgentTrainer(RayPPOTrainer):
 
                             del gen_baseline_batch, gen_baseline_output
 
-                    # batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object)
-                    # # repeat to align with repeated responses in rollout
-                    # batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
-                    batch = batch.union(gen_batch_output)
+                    # Add UIDs after batch is populated with actual data
+                    if batch.batch is not None and len(batch.batch) > 0:
+                        # Get batch size from any tensor in the batch
+                        batch_size = next(iter(batch.batch.values())).shape[0] if batch.batch else 0
+                        batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(batch_size)], dtype=object)
 
-                    batch.batch["response_mask"] = compute_response_mask(batch)
+                    batch.batch["response_mask"] = batch.batch["loss_mask"]
                     # Balance the number of valid tokens across DP ranks.
                     # NOTE: This usually changes the order of data in the `batch`,
                     # which won't affect the advantage calculation (since it's based on uid),
                     # but might affect the loss calculation (due to the change of mini-batching).
                     # TODO: Decouple the DP balancing and mini-batching.
                     if self.config.trainer.balance_batch:
+                        # ===================== DEBUG LOGGING FOR BATCH STRUCTURE =====================
+                        print("\n" + "="*80)
+                        print("🔍 DEBUG: Batch structure before _balance_batch")
+                        print("="*80)
+                        
+                        print(f"Batch type: {type(batch)}")
+                        print(f"Batch has batch attr: {hasattr(batch, 'batch')}")
+                        print(f"Batch.batch type: {type(batch.batch) if hasattr(batch, 'batch') else 'N/A'}")
+                        
+                        if hasattr(batch, 'batch') and batch.batch is not None:
+                            print(f"Batch.batch keys: {list(batch.batch.keys()) if hasattr(batch.batch, 'keys') else 'No keys method'}")
+                            
+                            # Check if it's a TensorDict or regular dict
+                            if hasattr(batch.batch, 'batch_size'):
+                                print(f"TensorDict batch_size: {batch.batch.batch_size}")
+                                
+                            # Check key tensor shapes and types
+                            for key in ['attention_mask', 'input_ids', 'responses', 'loss_mask', 'response_mask']:
+                                if hasattr(batch.batch, 'keys') and key in batch.batch.keys():
+                                    tensor = batch.batch[key]
+                                    print(f"  {key}: shape={tensor.shape}, dtype={tensor.dtype}, device={tensor.device}")
+                                    print(f"    Sample values: {tensor.flatten()[:5].tolist()}")
+                                else:
+                                    print(f"  {key}: ❌ MISSING")
+                        else:
+                            print("❌ batch.batch is None or missing!")
+                        
+                        # Check non_tensor_batch
+                        if hasattr(batch, 'non_tensor_batch') and batch.non_tensor_batch is not None:
+                            print(f"Non-tensor batch keys: {list(batch.non_tensor_batch.keys())}")
+                            for key, value in batch.non_tensor_batch.items():
+                                print(f"  {key}: type={type(value)}, len={len(value) if hasattr(value, '__len__') else 'N/A'}")
+                        else:
+                            print("❌ non_tensor_batch is None or missing!")
+                        
+                        # Check meta_info
+                        if hasattr(batch, 'meta_info') and batch.meta_info is not None:
+                            print(f"Meta info keys: {list(batch.meta_info.keys())}")
+                        else:
+                            print("❌ meta_info is None or missing!")
+                        
+                        # Try to access attention_mask specifically (key for balance_batch)
+                        try:
+                            if hasattr(batch, 'batch') and batch.batch is not None and 'attention_mask' in batch.batch.keys():
+                                attention_mask = batch.batch['attention_mask']
+                                seq_lengths = attention_mask.sum(dim=-1)
+                                print(f"Sequence lengths from attention_mask: {seq_lengths.tolist()}")
+                            else:
+                                print("❌ Cannot compute sequence lengths - attention_mask missing")
+                        except Exception as e:
+                            print(f"❌ Error accessing attention_mask: {e}")
+                        
+                        print("="*80)
+                        print("🔍 END DEBUG LOGGING")
+                        print("="*80 + "\n")
+                        # ===================== END DEBUG LOGGING =====================
+                        
                         self._balance_batch(batch, metrics=metrics)
 
                     # compute global_valid tokens
