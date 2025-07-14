@@ -26,80 +26,42 @@ from trainer.agent_trainer import AgentTrainer
 from verl.trainer.ppo.reward import load_reward_manager
 
 
-# ------ Config Dependency Function ------
-def add_dependency(config):
-    """
-    Initialize dependent configuration values based on base config values.
+# ------ DummyRewardManager Class ------
+class DummyRewardManager():
+    """The reward manager."""
     
-    Args:
-        config: The OmegaConf configuration object
+    def __init__(self, tokenizer, num_examine, compute_score=None) -> None:
+        self.tokenizer = tokenizer
+        self.num_examine = num_examine
+        self.compute_score = compute_score
+
+    def __call__(self, data):
+        # Your existing implementation that reads from data_item.non_tensor_batch['reward']
+        import torch
+        batch_size = data.batch['input_ids'].shape[0]
+        seq_len = data.batch['input_ids'].shape[1]
         
-    Returns:
-        config: The updated configuration object
-    """
-    print("Setting up configuration dependencies...")
-    
-    # Set up data configuration
-    if hasattr(config, 'train_batch_size'):
-        config.data.train_batch_size = config.train_batch_size
-        print(f"config.data.train_batch_size: {config.data.train_batch_size}")
-    
-    # Set up model paths
-    if hasattr(config, 'model_path'):
-        config.actor_rollout_ref.model.path = config.model_path
-        config.critic.model.path = config.model_path
-        print(f"config.actor_rollout_ref.model.path: {config.actor_rollout_ref.model.path}")
-    
-    # Set up batch sizes
-    if hasattr(config, 'ppo_mini_batch_size'):
-        config.actor_rollout_ref.actor.ppo_mini_batch_size = config.ppo_mini_batch_size
-        config.critic.ppo_mini_batch_size = config.ppo_mini_batch_size
-        print(f"config.ppo_mini_batch_size: {config.ppo_mini_batch_size}")
-    
-    # Set up micro batch sizes
-    if hasattr(config, 'micro_batch_size_per_gpu'):
-        config.actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu = config.micro_batch_size_per_gpu
-        config.actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu = config.micro_batch_size_per_gpu
-        config.actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu = config.micro_batch_size_per_gpu
-        config.critic.ppo_micro_batch_size_per_gpu = config.micro_batch_size_per_gpu
-        print(f"config.micro_batch_size_per_gpu: {config.micro_batch_size_per_gpu}")
-    
-    # Set up training steps
-    if hasattr(config, 'total_training_steps'):
-        config.trainer.total_training_steps = config.total_training_steps
-        print(f"config.trainer.total_training_steps: {config.trainer.total_training_steps}")
-    
-    # Set up GPU configuration
-    if hasattr(config, 'n_gpus_per_node'):
-        config.trainer.n_gpus_per_node = config.n_gpus_per_node
-        print(f"config.trainer.n_gpus_per_node: {config.trainer.n_gpus_per_node}")
-    
-    # Set up project configuration
-    if hasattr(config, 'project_name'):
-        config.trainer.project_name = config.project_name
-        print(f"config.trainer.project_name: {config.trainer.project_name}")
-    
-    if hasattr(config, 'experiment_name'):
-        config.trainer.experiment_name = config.experiment_name
-        print(f"config.trainer.experiment_name: {config.trainer.experiment_name}")
-    
-    return config
+        # Create dummy reward tensor
+        reward_tensor = torch.zeros(batch_size, seq_len)
+        
+        # If reward data exists in non_tensor_batch, use it
+        if hasattr(data, 'non_tensor_batch') and data.non_tensor_batch is not None:
+            if 'reward' in data.non_tensor_batch:
+                # Use the reward from non_tensor_batch
+                rewards = data.non_tensor_batch['reward']
+                for i, reward in enumerate(rewards):
+                    if i < batch_size:
+                        reward_tensor[i, -1] = reward  # Put reward at the end of sequence
+        
+        return reward_tensor
+
+
+# ------ Config Dependency Function ------
 
 
 @hydra.main(config_path="configs", config_name="ppo_trainer", version_base=None)
 def main(config):
-    # First resolve configuration variables
-    OmegaConf.resolve(config)
 
-    print(f"config: {config}")
-    
-    # # Then apply dependency setup
-    # config = add_dependency(config)
-    
-    # print(f"Final config model_path: {config.actor_rollout_ref.model.path}")
-    # print(f"Final config train_batch_size: {config.data.train_batch_size}")
-    # print(f"Final config micro_batch_size_per_gpu: {config.micro_batch_size_per_gpu}")
-    
     run_ppo(config)
 
 
@@ -228,17 +190,18 @@ class TaskRunner:
             role_worker_mapping[Role.RefPolicy] = ray.remote(ActorRolloutRefWorker)
             mapping[Role.RefPolicy] = global_pool_id
 
-        # Load the reward manager for training and validation.
-        reward_fn = load_reward_manager(config, tokenizer, num_examine=0, **config.reward_model.get("reward_kwargs", {}))
-        val_reward_fn = load_reward_manager(config, tokenizer, num_examine=1, **config.reward_model.get("reward_kwargs", {}))
+        # Use DummyRewardManager instead of load_reward_manager
+        print("using dummy reward manager")
+        reward_fn = DummyRewardManager(tokenizer=tokenizer, num_examine=0, compute_score=None)
+        val_reward_fn = DummyRewardManager(tokenizer=tokenizer, num_examine=1, compute_score=None)
         resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
 
         from verl.utils.dataset.rl_dataset import collate_fn
 
-        # Create training and validation datasets.
-        train_dataset = create_rl_dataset(config.data.train_files, config.data, tokenizer, processor)
-        val_dataset = create_rl_dataset(config.data.val_files, config.data, tokenizer, processor)
-        train_sampler = create_rl_sampler(config.data, train_dataset)
+        # Remove dataset preparation - using empty/dummy datasets
+        train_dataset = None
+        val_dataset = None
+        train_sampler = None
 
         # Initialize the Agent trainer.
         trainer = AgentTrainer(
@@ -250,10 +213,10 @@ class TaskRunner:
             ray_worker_group_cls=ray_worker_group_cls,
             reward_fn=reward_fn,
             val_reward_fn=val_reward_fn,
-            train_dataset=train_dataset,
-            val_dataset=val_dataset,
+            train_dataset=None,  # Changed from train_dataset
+            val_dataset=None,    # Changed from val_dataset
             collate_fn=collate_fn,
-            train_sampler=train_sampler,
+            train_sampler=None,  # Changed from train_sampler
             device_name=config.trainer.device,
         )
         # Initialize the workers of the trainer.
@@ -262,72 +225,9 @@ class TaskRunner:
         trainer.fit()
 
 
-def create_rl_dataset(data_paths, data_config, tokenizer, processor):
-    """Create a dataset.
-
-    Arguments:
-        data_paths: List of paths to data files.
-        data_config: The data config.
-        tokenizer (Tokenizer): The tokenizer.
-        processor (Processor): The processor.
-
-    Returns:
-        dataset (Dataset): The dataset.
-    """
-    from torch.utils.data import Dataset
-
-    from verl.utils.dataset.rl_dataset import RLHFDataset
-
-    # Check if a custom dataset class is specified in the data configuration
-    # and if the path to the custom class is provided
-    if "custom_cls" in data_config and data_config.custom_cls.get("path", None) is not None:
-        from verl.utils.import_utils import load_extern_type
-
-        # Dynamically load the custom dataset class
-        dataset_cls = load_extern_type(data_config.custom_cls.path, data_config.custom_cls.name)
-        # Verify that the custom dataset class inherits from torch.utils.data.Dataset
-        if not issubclass(dataset_cls, Dataset):
-            raise TypeError(f"The custom dataset class '{data_config.custom_cls.name}' from '{data_config.custom_cls.path}' must inherit from torch.utils.data.Dataset")
-    else:
-        # Use the default RLHFDataset class if no custom class is specified
-        dataset_cls = RLHFDataset
-    print(f"Using dataset class: {dataset_cls.__name__}")
-
-    # Instantiate the dataset using the determined dataset class
-    dataset = dataset_cls(
-        data_files=data_paths,
-        tokenizer=tokenizer,
-        processor=processor,
-        config=data_config,
-    )
-
-    return dataset
-
-
-def create_rl_sampler(data_config, dataset):
-    """Create a sampler for the dataset.
-
-    Arguments:
-        data_config: The data config.
-        dataset (Dataset): The dataset.
-
-    Returns:
-        sampler (Sampler): The sampler.
-    """
-    import torch
-    from torch.utils.data import RandomSampler, SequentialSampler
-
-    # Use a sampler to facilitate checkpoint resumption.
-    # If shuffling is enabled in the data configuration, create a random sampler.
-    if data_config.shuffle:
-        train_dataloader_generator = torch.Generator()
-        train_dataloader_generator.manual_seed(data_config.get("seed", 1))
-        sampler = RandomSampler(data_source=dataset, generator=train_dataloader_generator)
-    else:
-        # If shuffling is disabled, use a sequential sampler to iterate through the dataset in order.
-        sampler = SequentialSampler(data_source=dataset)
-
-    return sampler
+# Dataset creation functions removed - using dummy datasets instead
+# def create_rl_dataset(...) - REMOVED
+# def create_rl_sampler(...) - REMOVED
 
 
 if __name__ == "__main__":

@@ -9,18 +9,28 @@ defaults:
 system:
   CUDA_VISIBLE_DEVICES: 0
 
+# ------ Rollout Configuration ------
 rollout:
-  agent_batch_size: 4
-  agent_group_size: 2
+  agent_group_num: 2
+  agent_group_size: 4
   train: [sokobanAgent]
   validation: [sokobanAgent]
+  truncation: error  # moved from data config
+  enable_think: True  # enable thinking before answering
+  use_turn_scores: False  # for GAE computation
+  enable_response_mask: True  # for stability
+  rollout_filter_ratio: 0.25  # filter ratio for rollout selection
+  rollout_filter_type: std  # std or std_rev for filtering criteria
 
+# ------ Training Parameters ------
 train_batch_size: 128
 micro_batch_size_per_gpu: 4
 ppo_micro_batch_size_per_gpu: 4
 ppo_mini_batch_size: 32
 total_training_steps: 200
 n_gpus_per_node: 1
+max_prompt_length: 2048
+max_response_length: 400
 model_path: Qwen/Qwen2.5-0.5B
 project_name: lmgame
 experiment_name: sokoban_train_example
@@ -70,8 +80,8 @@ critic:
     betas: [0.9, 0.999]
 
 data:
-  max_prompt_length: null
-  max_response_length: null
+  max_prompt_length: ${max_prompt_length}
+  max_response_length: ${max_response_length}
   train_batch_size: ${train_batch_size}
 
 algorithm:

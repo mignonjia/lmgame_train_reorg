@@ -116,6 +116,96 @@ class AgentTrainer(RayPPOTrainer):
             processor=self.processor
         )
 
+    def _filter_rollout(self, batch: DataProto):
+        """
+        Filter rollout based on in-group statistics. We want groups with high-quality rollouts
+        that deviate significantly from the mean.
+        
+        Args:
+            batch: DataProto containing rollout data
+            
+        Returns:
+            tuple: (filtered_batch, metrics_dict)
+        """
+        rollout_filter_ratio = getattr(self.config.rollout, 'rollout_filter_ratio', 1.0)
+        rollout_filter_type = getattr(self.config.rollout, 'rollout_filter_type', 'std')
+        
+        # Use rollout config instead of es_manager config
+        num_groups = self.config.rollout.agent_group_num
+        group_size = self.config.rollout.agent_group_size
+
+        # Get RM scores and reshape to groups
+        rm_scores = batch.batch["rm_scores"].sum(dim=-1).view(num_groups, group_size)
+        
+        # Calculate in-group statistics
+        in_group_std = rm_scores.std(dim=-1)
+        in_group_max = rm_scores.max(dim=-1).values
+        in_group_mean = rm_scores.mean(dim=-1)
+        
+        # If no filtering (ratio = 1), return all data
+        if rollout_filter_ratio >= 1.0:
+            metrics = {
+                "rollout/in_group_std": in_group_std.mean(),
+                "rollout/in_group_max": in_group_max.mean(),
+                "rollout/in_group_mean": in_group_mean.mean(),
+                "rollout/chosen_in_group_std": in_group_std.mean(),
+                "rollout/chosen_in_group_max": in_group_max.mean(),
+                "rollout/chosen_in_group_mean": in_group_mean.mean()
+            }
+            return batch, metrics
+
+        # Select top groups based on filter type
+        num_groups_to_keep = max(1, int(rollout_filter_ratio * num_groups))
+        
+        if rollout_filter_type == "std_rev":
+            top_groups = (-in_group_std).topk(num_groups_to_keep).indices
+        elif rollout_filter_type == "std":
+            top_groups = in_group_std.topk(num_groups_to_keep).indices
+        else:
+            raise ValueError(f"Invalid rollout filter type: {rollout_filter_type}")
+
+        # Create mask for selected groups
+        mask = torch.zeros(num_groups, dtype=torch.bool)
+        mask[top_groups] = True
+        mask = mask.unsqueeze(1).expand(-1, group_size).flatten()
+
+        # Filter batch tensors
+        filtered_batch = DataProto()
+        filtered_batch.batch = {}
+        for key, value in batch.batch.items():
+            if isinstance(value, torch.Tensor):
+                filtered_batch.batch[key] = value[mask]
+            else:
+                filtered_batch.batch[key] = value
+
+        # Filter non-tensor batch
+        filtered_batch.non_tensor_batch = {}
+        for key, value in batch.non_tensor_batch.items():
+            if isinstance(value, np.ndarray):
+                filtered_batch.non_tensor_batch[key] = value[mask.cpu().numpy()]
+            elif isinstance(value, list):
+                filtered_batch.non_tensor_batch[key] = [v for v, m in zip(value, mask.cpu().numpy()) if m]
+            else:
+                filtered_batch.non_tensor_batch[key] = value
+
+        # Copy meta_info
+        filtered_batch.meta_info = batch.meta_info.copy() if batch.meta_info else {}
+
+        # Calculate metrics
+        metrics = {
+            "rollout/in_group_std": in_group_std.mean(),
+            "rollout/in_group_max": in_group_max.mean(),
+            "rollout/in_group_mean": in_group_mean.mean(),
+            "rollout/chosen_in_group_std": in_group_std[top_groups].mean(),
+            "rollout/chosen_in_group_max": in_group_max[top_groups].mean(),
+            "rollout/chosen_in_group_mean": in_group_mean[top_groups].mean(),
+            "rollout/filter_ratio_actual": len(top_groups) / num_groups,
+            "rollout/groups_kept": len(top_groups),
+            "rollout/total_groups": num_groups
+        }
+
+        return filtered_batch, metrics
+
     def _generate_multi_turn_sequences(self, gen_batch: DataProto) -> DataProto:
         """
         Replace single-turn generation with multi-turn rollout logic.
@@ -137,6 +227,15 @@ class AgentTrainer(RayPPOTrainer):
         # Build update batch containing full trajectories and rewards
         # This already returns a complete DataProto with all necessary fields
         rollout_batch = self.multi_turn_rollout.build_ppo_batch()
+        
+        # Apply rollout filtering if enabled
+        rollout_filter_ratio = getattr(self.config.rollout, 'rollout_filter_ratio', 1.0)
+        if rollout_filter_ratio < 1.0:
+            rollout_batch, filter_metrics = self._filter_rollout(rollout_batch)
+            # Add filter metrics to batch meta_info
+            if rollout_batch.meta_info is None:
+                rollout_batch.meta_info = {}
+            rollout_batch.meta_info.update(filter_metrics)
         
         # Return the complete DataProto directly - no need to rebuild it
         return rollout_batch
@@ -235,9 +334,9 @@ class AgentTrainer(RayPPOTrainer):
 
                             del gen_baseline_batch, gen_baseline_output
 
-                    batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object)
-                    # repeat to align with repeated responses in rollout
-                    batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
+                    # batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object)
+                    # # repeat to align with repeated responses in rollout
+                    # batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
                     batch = batch.union(gen_batch_output)
 
                     batch.batch["response_mask"] = compute_response_mask(batch)
@@ -430,20 +529,27 @@ class AgentTrainer(RayPPOTrainer):
         Modified from original RayPPOTrainer._validate() to use SyncMultiTurnRollout.
         """
         from collections import defaultdict
+        import time
         
+        reward_tensor_lst = []
         data_source_lst = []
-        reward_extra_infos_dict: dict[str, list] = defaultdict(list)
 
         # Lists to collect samples for the table
         sample_inputs = []
         sample_outputs = []
         sample_scores = []
 
-        # ─────────────────── MODIFICATION: Use agent-based validation ───────────────────
+        # ─────────────────── MODIFICATION: Use rollout-based validation config ───────────────────
         env_metric_dict = {}
         for step in range(self.config.trainer.validation_steps):
-            # Store original inputs (empty for agent-based validation)
-            input_texts = ["" for _ in range(self.config.es_manager.val.env_groups * self.config.es_manager.val.group_size)]
+            # ✅ MODIFICATION: Use agent_group_num * agent_group_size for total validation agents
+            agent_group_num = self.config.rollout.agent_group_num
+            agent_group_size = self.config.rollout.agent_group_size
+            total_validation_agents = agent_group_num * agent_group_size
+            
+            print(f"Validation step {step+1}: Running {total_validation_agents} agents ({agent_group_num} groups × {agent_group_size} agents/group)")
+            
+            input_texts = ["" for _ in range(total_validation_agents)]
             sample_inputs.extend(input_texts)
             
             meta_info = {
@@ -456,22 +562,21 @@ class AgentTrainer(RayPPOTrainer):
             test_gen_batch = DataProto(batch=None, non_tensor_batch=None, meta_info=meta_info)
             print(f"test_gen_batch meta info: {test_gen_batch.meta_info}")
 
-            # ─────────────────── MODIFICATION: Use multi-turn rollout instead of single generation ───────────────────
-            import time
+            # ─────────────────── MODIFICATION: Use multi-turn rollout with rollout() + build_ppo_batch() ───────────────────
             start_time = time.time()
             
             # Initialize multi-turn rollout if not already done
             if self.multi_turn_rollout is None:
                 self.init_multi_turn_rollout()
             
-            # Run multi-turn rollout for validation
+            # ✅ MODIFICATION: Call rollout() first, then build_ppo_batch() 
             final_env_outs = self.multi_turn_rollout.rollout()
             test_batch = self.multi_turn_rollout.build_ppo_batch()
             
             end_time = time.time()
             print(f"validation generation time: {end_time - start_time} seconds")
             
-            # Collect environment metrics from rollout
+            # ✅ MODIFICATION: Use "val-env/" prefix for environment metrics
             for key, value in test_batch.meta_info["metrics"].items():
                 if "val-env/" + key not in env_metric_dict:
                     env_metric_dict["val-env/" + key] = []
@@ -484,62 +589,40 @@ class AgentTrainer(RayPPOTrainer):
 
             # ─────────────────── ORIGINAL: Evaluate using reward function ───────────────────
             # evaluate using reward_function
-            result = self.val_reward_fn(test_batch, return_dict=True)
-            reward_tensor = result["reward_tensor"]
+            reward_tensor = self.val_reward_fn(test_batch)
+            
+            # ✅ MODIFICATION: Store scores and collect for final processing
             scores = reward_tensor.sum(-1).cpu().tolist()
             sample_scores.extend(scores)
 
-            reward_extra_infos_dict["reward"].extend(scores)
-            if "reward_extra_info" in result:
-                for key, lst in result["reward_extra_info"].items():
-                    reward_extra_infos_dict[key].extend(lst)
-
+            reward_tensor_lst.append(reward_tensor)
             data_source_lst.append(test_batch.non_tensor_batch.get("data_source", ["unknown"] * reward_tensor.shape[0]))
 
-        # ─────────────────── ORIGINAL: Log and dump generations ───────────────────
-        self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
-
-        # dump generations
-        val_data_dir = self.config.trainer.get("validation_data_dir", None)
-        if val_data_dir:
-            self._dump_generations(
-                inputs=sample_inputs,
-                outputs=sample_outputs,
-                scores=sample_scores,
-                reward_extra_infos_dict=reward_extra_infos_dict,
-                dump_path=val_data_dir,
-            )
-
-        for key_info, lst in reward_extra_infos_dict.items():
-            assert len(lst) == 0 or len(lst) == len(sample_scores), f"{key_info}: {len(lst)=}, {len(sample_scores)=}"
-
+        # ✅ MODIFICATION: Process tensor list and data sources like the example
+        reward_tensor_lst = [i.sum(-1).cpu() for i in reward_tensor_lst]
+        reward_tensor = torch.cat(reward_tensor_lst)  # (batch_size,)
         data_sources = np.concatenate(data_source_lst, axis=0)
 
-        # ─────────────────── MODIFICATION: Process validation metrics with env metrics ───────────────────
+        # ✅ MODIFICATION: Evaluate test_score based on data source like the example
+        data_source_reward = {}
+        for i in range(reward_tensor.shape[0]):
+            data_source = data_sources[i]
+            if data_source not in data_source_reward:
+                data_source_reward[data_source] = []
+            data_source_reward[data_source].append(reward_tensor[i].item())
+
+        # ✅ MODIFICATION: Simple metric processing with fallback
         try:
-            from verl.trainer.ppo.metric_utils import process_validation_metrics
             from verl.utils.metric import reduce_metrics
         except ImportError:
-            # Fallback implementations if verl is not available
-            def process_validation_metrics(data_sources, sample_inputs, reward_extra_infos_dict):
-                return {"unknown": {"reward": {"mean@1": np.mean(reward_extra_infos_dict.get("reward", [0]))}}}
-            
+            # Fallback implementation
             def reduce_metrics(metrics_dict):
                 return {k: np.mean(v) if isinstance(v, list) else v for k, v in metrics_dict.items()}
-        
-        data_src2var2metric2val = process_validation_metrics(data_sources, sample_inputs, reward_extra_infos_dict)
-        metric_dict = reduce_metrics(env_metric_dict)
 
-        for data_source, var2metric2val in data_src2var2metric2val.items():
-            core_var = "acc" if "acc" in var2metric2val else "reward"
-            for var_name, metric2val in var2metric2val.items():
-                n_max = max([int(name.split("@")[-1].split("/")[0]) for name in metric2val.keys()])
-                for metric_name, metric_val in metric2val.items():
-                    if (var_name == core_var) and any(metric_name.startswith(pfx) for pfx in ["mean", "maj", "best"]) and (f"@{n_max}" in metric_name):
-                        metric_sec = "val-core"
-                    else:
-                        metric_sec = "val-aux"
-                    pfx = f"{metric_sec}/{data_source}/{var_name}/{metric_name}"
-                    metric_dict[pfx] = metric_val
+        metric_dict = reduce_metrics(env_metric_dict)
+        
+        # ✅ MODIFICATION: Add test scores per data source like the example
+        for data_source, rewards in data_source_reward.items():
+            metric_dict[f'val-env/test_score/{data_source}'] = np.mean(rewards)
 
         return metric_dict

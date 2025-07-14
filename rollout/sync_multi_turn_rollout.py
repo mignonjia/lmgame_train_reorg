@@ -34,8 +34,14 @@ class SyncMultiTurnRollout:
         self.processor = processor
         self.actor_wg = actor_rollout_wg
         
-        # Determine batch size from agent_batch_size
-        self.n_agents = getattr(cfg, "agent_batch_size", 1)
+        # ✅ MODIFICATION: Calculate total agents from agent_group_num * agent_group_size
+        agent_group_num = getattr(cfg.rollout, "agent_group_num", 1)
+        agent_group_size = getattr(cfg.rollout, "agent_group_size", 1)
+        self.n_agents = agent_group_num * agent_group_size
+        self.agent_group_num = agent_group_num
+        self.agent_group_size = agent_group_size
+        
+        print(f"Initializing {self.n_agents} agents ({agent_group_num} groups × {agent_group_size} agents/group)")
         
         # Initialize agent configuration from config
         self._setup_agent_config()
@@ -50,8 +56,8 @@ class SyncMultiTurnRollout:
         Setup agent configuration for single agent type.
         Agent class is resolved from config and agent config is extracted.
         """
-        # Get agent name from train list (first item)
-        train_agents = getattr(self.cfg, 'train', ['sokobanAgent'])
+        # Get agent name from rollout config train list (first item)
+        train_agents = getattr(self.cfg.rollout, 'train', ['sokobanAgent'])
         agent_name = train_agents[0] if train_agents else 'sokobanAgent'
         
         # Resolve agent class from registry
@@ -60,6 +66,9 @@ class SyncMultiTurnRollout:
         # Extract agent configuration from agents.yaml format
         # The config should contain the agent configuration under the agent name
         self.agent_config = self.cfg[agent_name]
+        
+        # Get max_turns from agent config
+        self.max_turns = self.agent_config['agent_config'].get('max_turns', 5)
 
     def _init_batch_agents(self):
         """
@@ -72,21 +81,18 @@ class SyncMultiTurnRollout:
         if self.agent_cls is None:
             raise ValueError("agent_cls is None but trying to create agents")
         
-        # Get group size from config, default to 1 if not specified
-        agent_group_size = getattr(self.cfg, 'agent_group_size', 1)
+        # ✅ MODIFICATION: Use stored config values for consistent group assignment
+        print(f"Creating {self.n_agents} agents in {self.agent_group_num} groups of size {self.agent_group_size}")
         
-        # Calculate number of groups
-        num_groups = self.n_agents // agent_group_size
-        if self.n_agents % agent_group_size != 0:
-            raise ValueError(f"agent_batch_size ({self.n_agents}) must be divisible by agent_group_size ({agent_group_size})")
-        
-        print(f"Creating {self.n_agents} agents in {num_groups} groups of size {agent_group_size}")
+        # Verify the math
+        if self.n_agents != self.agent_group_num * self.agent_group_size:
+            raise ValueError(f"Total agents ({self.n_agents}) != agent_group_num ({self.agent_group_num}) × agent_group_size ({self.agent_group_size})")
         
         self.agents = []
         
         for idx in range(self.n_agents):
-            # Calculate group_id for this agent
-            group_id = idx // agent_group_size
+            # ✅ MODIFICATION: Calculate group_id using stored agent_group_size
+            group_id = idx // self.agent_group_size
             
             # Create agent with the extracted agent configuration
             agent = self.agent_cls(
@@ -134,7 +140,7 @@ class SyncMultiTurnRollout:
             prompt_str = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
             
             # Add answer format prompt
-            enable_think = getattr(self.cfg.agent, 'enable_think', False)
+            enable_think = getattr(self.cfg.rollout, 'enable_think', False)
             if enable_think:
                 prompt_str += "<think>"  # Force LLM to think before answering
             else:
@@ -150,10 +156,10 @@ class SyncMultiTurnRollout:
             input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(
                 prompt=prompt_str,
                 tokenizer=self.tokenizer,
-                max_length=getattr(self.cfg.data, 'max_prompt_length', 2048),
+                max_length=self.cfg.max_prompt_length,
                 pad_token_id=self.tokenizer.pad_token_id,
                 left_pad=True,  # Left pad for batch generation
-                truncation=getattr(self.cfg.agent, 'truncation', 'right')
+                truncation=self.cfg.rollout.truncation
             )
             
             # Compute position ids
@@ -249,7 +255,7 @@ class SyncMultiTurnRollout:
         """
         self._reset_batch_agents()
         
-        for turn in range(self.cfg.agent.max_turn):
+        for turn in range(self.max_turns):
             if self.done_mask.all():
                 break
 
@@ -309,7 +315,7 @@ class SyncMultiTurnRollout:
                 messages[-1]["content"] += f"\nTurn {idx + 1}:\n"
                 
                 if "state" in content:
-                    enable_think = getattr(self.cfg.agent, 'enable_think', False)
+                    enable_think = getattr(self.cfg.rollout, 'enable_think', False)
                     FORMAT_PROMPT = "<think> [Your thoughts] </think> <answer> [your answer] </answer>" if enable_think else "<answer> [your answer] </answer>"
                     messages[-1]["content"] += f"State:\n{content['state']}\nYou have {content['actions_left']} actions left. Always output: {FORMAT_PROMPT} with no extra text. Strictly follow this format.\n"
                 
@@ -351,8 +357,8 @@ class SyncMultiTurnRollout:
                 input_ids, 
                 self.tokenizer, 
                 scores, 
-                use_turn_scores=getattr(self.cfg.agent, 'use_turn_scores', False),
-                enable_response_mask=getattr(self.cfg, 'enable_response_mask', True)
+                use_turn_scores=getattr(self.cfg.rollout, 'use_turn_scores', False),
+                enable_response_mask=getattr(self.cfg.rollout, 'enable_response_mask', True)
             )
         except ImportError:
             # Fallback if function not available
