@@ -340,6 +340,15 @@ class SyncMultiTurnRollout:
         )
         input_ids, attention_mask = inputs.input_ids, inputs.attention_mask
         
+        # ===================== DEBUG: Tensor Shapes =====================
+        print(f"\n[DEBUG] build_ppo_batch - After tokenization:")
+        print(f"  input_ids shape: {input_ids.shape}")
+        print(f"  attention_mask shape: {attention_mask.shape}")
+        print(f"  Number of texts tokenized: {len(llm_input_texts)}")
+        print(f"  Sample input_ids[0][:10]: {input_ids[0][:10].tolist()}")
+        print(f"  Sample input_ids[0][-10:]: {input_ids[0][-10:].tolist()}")
+        # ================================================================
+        
         # Compute position ids
         from verl.utils.model import compute_position_id_with_mask
         position_ids = compute_position_id_with_mask(attention_mask)
@@ -366,6 +375,17 @@ class SyncMultiTurnRollout:
             loss_mask = torch.ones_like(input_ids[:, 1:], dtype=torch.float)
             response_mask = torch.ones_like(input_ids[:, 1:], dtype=torch.float)
         
+        # ===================== DEBUG: Response and Mask Shapes =====================
+        responses = input_ids[:, 1:]  # remove the first token
+        print(f"\n[DEBUG] build_ppo_batch - Responses and masks:")
+        print(f"  responses shape: {responses.shape}")
+        print(f"  loss_mask shape: {loss_mask.shape}")
+        print(f"  response_mask shape: {response_mask.shape if response_mask is not None else 'None'}")
+        print(f"  score_tensor shape: {score_tensor.shape}")
+        print(f"  input_ids[:, 1:] shape: {input_ids[:, 1:].shape}")
+        print(f"  Difference input_ids vs responses: {input_ids.shape[1]} vs {responses.shape[1]} (diff: {input_ids.shape[1] - responses.shape[1]})")
+        # ========================================================================
+        
         # Build DataProto with proper TensorDict
         llm_inputs = DataProto()
         
@@ -373,12 +393,30 @@ class SyncMultiTurnRollout:
         device = input_ids.device
         batch_size = input_ids.shape[0]
         
+        # ===================== DEBUG: Final TensorDict Shapes =====================
+        final_responses = input_ids[:, 1:]  # remove the first token
+        print(f"\n[DEBUG] build_ppo_batch - Final TensorDict creation:")
+        print(f"  batch_size: {batch_size}")
+        print(f"  device: {device}")
+        print(f"  input_ids: {input_ids.shape}")
+        print(f"  attention_mask: {attention_mask.shape}")
+        print(f"  position_ids: {position_ids.shape}")
+        print(f"  final_responses: {final_responses.shape}")
+        print(f"  loss_mask: {loss_mask.shape}")
+        print(f"  score_tensor (rm_scores): {score_tensor.shape}")
+        print(f"  Token count mismatch check:")
+        print(f"    input_ids tokens: {input_ids.shape[1]}")
+        print(f"    responses tokens: {final_responses.shape[1]}")
+        print(f"    loss_mask tokens: {loss_mask.shape[1]}")
+        print(f"    score_tensor tokens: {score_tensor.shape[1]}")
+        # ======================================================================
+        
         # Create TensorDict with proper batch_size parameter
         llm_inputs.batch = TensorDict({
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "position_ids": position_ids,
-            "responses": input_ids[:, 1:],  # remove the first token
+            "responses": final_responses,
             "loss_mask": loss_mask,
             "rm_scores": score_tensor,
             "original_rm_scores": score_tensor,

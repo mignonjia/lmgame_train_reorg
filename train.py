@@ -32,28 +32,76 @@ class DummyRewardManager():
     
     def __init__(self, tokenizer, num_examine, compute_score=None) -> None:
         self.tokenizer = tokenizer
-        self.num_examine = num_examine
+        self.num_examine = num_examine  # the number of batches of decoded responses to print to the console
         self.compute_score = compute_score
 
-    def __call__(self, data):
-        # Your existing implementation that reads from data_item.non_tensor_batch['reward']
+    def __call__(self, data, return_dict=False):
+        """We will expand this function gradually based on the available datasets"""
         import torch
-        batch_size = data.batch['input_ids'].shape[0]
-        seq_len = data.batch['input_ids'].shape[1]
-        
-        # Create dummy reward tensor
-        reward_tensor = torch.zeros(batch_size, seq_len)
-        
-        # If reward data exists in non_tensor_batch, use it
-        if hasattr(data, 'non_tensor_batch') and data.non_tensor_batch is not None:
-            if 'reward' in data.non_tensor_batch:
-                # Use the reward from non_tensor_batch
-                rewards = data.non_tensor_batch['reward']
-                for i, reward in enumerate(rewards):
-                    if i < batch_size:
-                        reward_tensor[i, -1] = reward  # Put reward at the end of sequence
-        
-        return reward_tensor
+        import numpy as np
+
+        # If there is rm score, we directly return rm score. Otherwise, we compute via rm_score_fn
+        if 'rm_scores' in data.batch.keys():
+            reward_tensor = data.batch['rm_scores']
+        else:
+            reward_tensor = torch.zeros_like(data.batch['responses'], dtype=torch.float32)
+
+            all_scores = []
+            already_print_data_sources = {}
+
+            for i in range(len(data)):
+                data_item = data[i]  # DataProtoItem
+
+                prompt_ids = data_item.batch['prompts'] if 'prompts' in data_item.batch else data_item.batch['input_ids']
+                prompt_length = prompt_ids.shape[-1] if 'prompts' in data_item.batch else data_item.batch['input_ids'].shape[-1] - data_item.batch['responses'].shape[-1]
+
+                valid_prompt_length = data_item.batch['attention_mask'][:prompt_length].sum()
+                valid_prompt_ids = prompt_ids[-valid_prompt_length:] if 'prompts' in data_item.batch else data_item.batch['input_ids'][-valid_prompt_length:]
+
+                response_ids = data_item.batch['responses']
+                valid_response_length = data_item.batch['attention_mask'][prompt_length:].sum() if 'prompts' in data_item.batch else data_item.batch['attention_mask'].sum() - valid_prompt_length
+                valid_response_ids = response_ids[:valid_response_length]
+
+                # decode
+                sequences = torch.cat((valid_prompt_ids, valid_response_ids))
+                sequences_str = self.tokenizer.decode(sequences)
+
+                # Get score from non_tensor_batch if available
+                if hasattr(data_item, 'non_tensor_batch') and data_item.non_tensor_batch is not None:
+                    score = data_item.non_tensor_batch.get('reward', 0.0)
+                else:
+                    score = 0.0
+                
+                score = float(score)
+     
+                reward_tensor[i, valid_response_length - 1] = score
+                all_scores.append(score)
+
+                # Get data_source from data_item if available, otherwise use a default value
+                data_source = data_item.non_tensor_batch.get('data_source', 'unknown') if hasattr(data_item, 'non_tensor_batch') and data_item.non_tensor_batch is not None else 'unknown'
+                
+                if data_source not in already_print_data_sources:
+                    already_print_data_sources[data_source] = 0
+
+                if already_print_data_sources[data_source] < self.num_examine:
+                    already_print_data_sources[data_source] += 1
+                    print(sequences_str)
+            
+            print(f"[DEBUG] all_scores: {all_scores}")
+            print(f"[DEBUG] all_scores shape: {np.array(all_scores).shape}")
+            print(f"[DEBUG] all_scores mean: {np.mean(all_scores)}")
+            print(f"[DEBUG] all_scores max: {np.max(all_scores)}")
+            print(f"[DEBUG] all_scores min: {np.min(all_scores)}")
+            print(f"[DEBUG] all_scores std: {np.std(all_scores)}")
+
+        # Handle return_dict parameter
+        if return_dict:
+            return {
+                "reward_tensor": reward_tensor,
+                "reward_extra_info": {}  # Empty dict for now, can be expanded later
+            }
+        else:
+            return reward_tensor
 
 
 # ------ Config Dependency Function ------
