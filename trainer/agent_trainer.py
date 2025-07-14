@@ -68,7 +68,6 @@ class AgentTrainer(RayPPOTrainer):
         assert self.config.trainer.total_training_steps is not None, "must determine total training steps"
         
         self.total_training_steps = self.config.trainer.total_training_steps
-        print(f"Total training steps: {self.total_training_steps}")
         
         # Create a dummy dataloader that yields empty batches
         # The actual data generation happens in _generate_multi_turn_sequences
@@ -106,7 +105,7 @@ class AgentTrainer(RayPPOTrainer):
                 if OmegaConf.select(self.config, "critic.optim"):
                     self.config.critic.optim.total_training_steps = self.total_training_steps
         except Exception as e:
-            print(f"Warning: Could not set total_training_steps in config. Structure missing? Error: {e}")
+            pass  # Config structure missing, continue without setting
 
     def init_workers(self):
         """Override to initialize both parent workers and multi-turn rollout manager."""
@@ -236,80 +235,31 @@ class AgentTrainer(RayPPOTrainer):
         Returns:
             tuple: (rollout_batch: DataProto, filter_metrics: dict)
         """
-        print(f"\n🔍 DEBUG: _generate_multi_turn_sequences called")
-        print(f"   Gen batch type: {type(gen_batch)}")
-        print(f"   Gen batch has batch: {hasattr(gen_batch, 'batch')}")
-        print(f"   Gen batch has non_tensor_batch: {hasattr(gen_batch, 'non_tensor_batch')}")
-        
         # Initialize multi-turn rollout if not already done
         if self.multi_turn_rollout is None:
-            print(f"   Initializing multi-turn rollout...")
             self.init_multi_turn_rollout()
-            print(f"   Multi-turn rollout initialized")
         
         # Type narrowing assertion - we know it's not None after initialization
         assert self.multi_turn_rollout is not None, "multi_turn_rollout should be initialized"
         
-        print(f"   Multi-turn rollout info:")
-        print(f"      Number of agents: {self.multi_turn_rollout.n_agents}")
-        print(f"      Agent group num: {self.multi_turn_rollout.agent_group_num}")  
-        print(f"      Agent group size: {self.multi_turn_rollout.agent_group_size}")
-        print(f"      Max turns: {self.multi_turn_rollout.max_turns}")
-        print(f"      Current step: {self.multi_turn_rollout.step_cnt}")
-        
         # Run multi-turn rollout to get complete trajectories
-        print(f"   Starting multi-turn rollout...")
         final_env_outs = self.multi_turn_rollout.rollout()
-        print(f"   Multi-turn rollout completed")
-        print(f"   Final env outs type: {type(final_env_outs)}")
-        print(f"   Final env outs length: {len(final_env_outs) if final_env_outs else 0}")
-        
-        if final_env_outs:
-            done_count = sum(1 for env_out in final_env_outs if env_out.done)
-            print(f"   Done agents: {done_count}/{len(final_env_outs)}")
         
         # Build update batch containing full trajectories and rewards
         # This already returns a complete DataProto with all necessary fields
-        print(f"   Building PPO batch...")
         rollout_batch = self.multi_turn_rollout.build_ppo_batch()
-        print(f"   PPO batch built")
-        print(f"   PPO batch type: {type(rollout_batch)}")
-        print(f"   PPO batch has batch: {hasattr(rollout_batch, 'batch')}")
-        
-        if hasattr(rollout_batch, 'batch') and rollout_batch.batch is not None:
-            print(f"   PPO batch keys: {list(rollout_batch.batch.keys())}")
-            if 'input_ids' in rollout_batch.batch:
-                input_ids = rollout_batch.batch['input_ids']
-                print(f"   Input IDs shape: {input_ids.shape}")
-                
-                # Check for all-padding sequences in the final batch
-                pad_token_id = self.tokenizer.pad_token_id
-                problematic_agents = []
-                for i in range(input_ids.shape[0]):
-                    seq = input_ids[i]
-                    non_pad_count = (seq != pad_token_id).sum().item()
-                    if non_pad_count == 0:
-                        problematic_agents.append(i)
-                
-                if problematic_agents:
-                    print(f"   ❌ CRITICAL: Final PPO batch has {len(problematic_agents)} all-padding sequences!")
-                    print(f"   This will cause vLLM IndexError!")
         
         # Apply rollout filtering if enabled
         rollout_filter_ratio = getattr(self.config.rollout, 'rollout_filter_ratio', 1.0)
         if rollout_filter_ratio < 1.0:
-            print(f"   Applying rollout filtering (ratio: {rollout_filter_ratio})...")
             rollout_batch, filter_metrics = self._filter_rollout(rollout_batch)
             # Add filter metrics to batch meta_info
             if rollout_batch.meta_info is None:
                 rollout_batch.meta_info = {}
             rollout_batch.meta_info.update(filter_metrics)
-            print(f"   Rollout filtering applied")
         else:
-            print(f"   No rollout filtering (ratio: {rollout_filter_ratio})")
             filter_metrics = {}
         
-        print(f"   Returning rollout batch and metrics")
         # Return the complete DataProto and metrics as tuple consistently
         return rollout_batch, filter_metrics
 
@@ -341,7 +291,7 @@ class AgentTrainer(RayPPOTrainer):
         if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True):
             val_metrics = self._validate()
             assert val_metrics, f"{val_metrics=}"
-            pprint(f"Initial validation metrics: {val_metrics}")
+
             logger.log(data=val_metrics, step=self.global_steps)
             if self.config.trainer.get("val_only", False):
                 return
@@ -540,7 +490,6 @@ class AgentTrainer(RayPPOTrainer):
                     rollout_data_dir = self.config.trainer.get("rollout_data_dir", None)
                     if rollout_data_dir:
                         with marked_timer("dump_rollout_generations", timing_raw, color="green"):
-                            print(batch.batch.keys())
                             inputs = self.tokenizer.batch_decode(batch.batch["prompts"], skip_special_tokens=True)
                             outputs = self.tokenizer.batch_decode(batch.batch["responses"], skip_special_tokens=True)
                             scores = batch.batch["token_level_scores"].sum(-1).cpu().tolist()
@@ -594,7 +543,6 @@ class AgentTrainer(RayPPOTrainer):
                         self.rm_wg.stop_profile()
 
                 if is_last_step:
-                    pprint(f"Final validation metrics: {last_val_metrics}")
                     progress_bar.close()
                     return
 
@@ -622,7 +570,7 @@ class AgentTrainer(RayPPOTrainer):
             agent_group_size = self.config.rollout.agent_group_size
             total_validation_agents = agent_group_num * agent_group_size
             
-            print(f"Validation step {step+1}: Running {total_validation_agents} agents ({agent_group_num} groups × {agent_group_size} agents/group)")
+
             
             input_texts = ["" for _ in range(total_validation_agents)]
             sample_inputs.extend(input_texts)
@@ -635,7 +583,6 @@ class AgentTrainer(RayPPOTrainer):
                 "validate": True,
             }
             test_gen_batch = DataProto(batch=None, non_tensor_batch=None, meta_info=meta_info)
-            print(f"test_gen_batch meta info: {test_gen_batch.meta_info}")
 
             # ─────────────────── MODIFICATION: Use multi-turn rollout with rollout() + build_ppo_batch() ───────────────────
             start_time = time.time()
@@ -652,7 +599,6 @@ class AgentTrainer(RayPPOTrainer):
             test_batch = self.multi_turn_rollout.build_ppo_batch()
             
             end_time = time.time()
-            print(f"validation generation time: {end_time - start_time} seconds")
             
             # ✅ MODIFICATION: Use "val-env/" prefix for environment metrics
             for key, value in test_batch.meta_info["metrics"].items():

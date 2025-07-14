@@ -41,7 +41,7 @@ class SyncMultiTurnRollout:
         self.agent_group_num = agent_group_num
         self.agent_group_size = agent_group_size
         
-        print(f"Initializing {self.n_agents} agents ({agent_group_num} groups × {agent_group_size} agents/group)")
+
         
         # Initialize agent configuration from config
         self._setup_agent_config()
@@ -117,61 +117,32 @@ class SyncMultiTurnRollout:
         Returns:
             DataProto: Batched DataProto containing input_ids, attention_mask, position_ids
         """
-        print(f"\n🔍 DEBUG: get_batch_llm_prompts called with {len(env_outputs)} env_outputs")
-        
         llm_input_texts = []
         
         for idx, env_out in enumerate(env_outputs):
-            print(f"\n   Agent {idx} Prompt Generation:")
-            print(f"      Done status: {self.done_mask[idx]}")
-            print(f"      Env output: done={env_out.done}, reward={env_out.reward}")
-            print(f"      State length: {len(env_out.state) if env_out.state else 0}")
-            
             if self.done_mask[idx]:
                 # For done agents, use empty prompt
-                print(f"      → Using empty prompt (agent done)")
                 llm_input_texts.append("")
                 continue
                 
             agent = self.agents[idx]
-            print(f"      Agent state: turn={agent.cur_turn}, messages={len(agent.messages)}")
             
             # Each agent returns messages format
             messages = agent.get_llm_prompts(env_out)
-            print(f"      Generated {len(messages)} messages:")
-            
-            for i, msg in enumerate(messages):
-                role = msg.get('role', 'unknown')
-                content = msg.get('content', '')
-                content_preview = content[:100] + '...' if len(content) > 100 else content
-                print(f"         Msg {i}: {role} - '{content_preview}'")
-                print(f"                  Content length: {len(content)}")
             
             # Apply chat template to convert messages to text
             try:
                 prompt_str = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-                print(f"      Chat template applied, result length: {len(prompt_str)}")
-                print(f"      Prompt preview (first 200 chars): '{prompt_str[:200]}{'...' if len(prompt_str) > 200 else ''}'")
             except Exception as e:
-                print(f"      ❌ Chat template failed: {e}")
                 prompt_str = "System error in chat template"
             
-            # Add answer format prompt
-            enable_think = getattr(self.cfg.rollout, 'enable_think', False)
-            if enable_think:
-                prompt_str += "<think>"  # Force LLM to think before answering
-                print(f"      Added <think> suffix")
-            else:
-                prompt_str += "<answer>"  # Force LLM to answer
-                print(f"      Added <answer> suffix")
-            
-            print(f"      Final prompt length: {len(prompt_str)}")
-            if len(prompt_str.strip()) == 0:
-                print(f"      ❌ WARNING: Final prompt is empty or whitespace!")
+            # Add answer format prompt based on agent's enable_think setting
+            agent = self.agents[idx]
+        
             
             llm_input_texts.append(prompt_str)
         
-        print(f"\n🔍 DEBUG: Generated {len(llm_input_texts)} prompts for tokenization")
+
         
         # Check prompt statistics
         empty_prompts = sum(1 for p in llm_input_texts if not p or len(p.strip()) == 0)
@@ -184,14 +155,9 @@ class SyncMultiTurnRollout:
         batch_list = []
         
         for i, prompt_str in enumerate(llm_input_texts):
-            print(f"\n   Tokenizing prompt {i}:")
-            print(f"      Input length: {len(prompt_str)}")
-            print(f"      Input preview: '{prompt_str[:100]}{'...' if len(prompt_str) > 100 else ''}'")
             
             if not prompt_str or len(prompt_str.strip()) == 0:
-                print(f"      ❌ WARNING: Empty prompt for agent {i}!")
                 prompt_str = "Please respond."  # Fallback
-                print(f"      Using fallback prompt: '{prompt_str}'")
             
             # Use verl_F.tokenize_and_postprocess_data for consistent processing
             try:
@@ -204,28 +170,13 @@ class SyncMultiTurnRollout:
                     truncation=self.cfg.rollout.truncation
                 )
                 
-                print(f"      Tokenization successful:")
-                print(f"         Input IDs shape: {input_ids.shape}")
-                print(f"         Attention mask shape: {attention_mask.shape}")
                 
                 # Check for all-padding sequences
                 pad_token_id = self.tokenizer.pad_token_id
                 non_pad_count = (input_ids != pad_token_id).sum().item()
                 total_tokens = input_ids.numel()
                 
-                print(f"         Pad token ID: {pad_token_id}")
-                print(f"         Non-padding tokens: {non_pad_count}/{total_tokens}")
-                print(f"         Input IDs sample: {input_ids.flatten()[:10].tolist()}")
-                
-                if non_pad_count == 0:
-                    print(f"         ❌ CRITICAL: ALL TOKENS ARE PADDING! This will cause vLLM IndexError!")
-                    print(f"         Original prompt: '{prompt_str}'")
-                    print(f"         Full input_ids: {input_ids.flatten().tolist()}")
-                elif non_pad_count < 3:
-                    print(f"         ⚠️  WARNING: Very few non-padding tokens ({non_pad_count})")
-                
             except Exception as e:
-                print(f"      ❌ Tokenization failed: {e}")
                 # Create emergency fallback tokens
                 fallback_text = "Please respond."
                 input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(
@@ -236,7 +187,6 @@ class SyncMultiTurnRollout:
                     left_pad=True,
                     truncation=self.cfg.rollout.truncation
                 )
-                print(f"      Using emergency fallback tokenization")
             
             # Compute position ids
             from verl.utils.model import compute_position_id_with_mask
@@ -251,49 +201,13 @@ class SyncMultiTurnRollout:
             }
             batch_list.append(row_dict)
         
-        print(f"\n🔍 DEBUG: Collating {len(batch_list)} tokenized prompts")
-        
         # Use collate_fn to batch the data, then convert to DataProto
         try:
             batch_dict = collate_fn(batch_list)
             result_dataproto = DataProto.from_single_dict(batch_dict)
-            
-            print(f"   Collation successful:")
-            print(f"      Batch keys: {list(batch_dict.keys())}")
-            
-            # Final validation of the batched data
-            if 'input_ids' in batch_dict:
-                input_ids_batch = batch_dict['input_ids']
-                print(f"      Final batch input_ids shape: {input_ids_batch.shape}")
-                
-                # Check each sequence in the batch for all-padding
-                pad_token_id = self.tokenizer.pad_token_id
-                problematic_sequences = []
-                
-                for i in range(input_ids_batch.shape[0]):
-                    seq = input_ids_batch[i]
-                    non_pad_count = (seq != pad_token_id).sum().item()
-                    if non_pad_count == 0:
-                        problematic_sequences.append(i)
-                
-                if problematic_sequences:
-                    print(f"      ❌ CRITICAL: Found {len(problematic_sequences)} all-padding sequences!")
-                    print(f"      Problematic agent indices: {problematic_sequences}")
-                    print(f"      This WILL cause vLLM IndexError!")
-                    
-                    # Show details of first problematic sequence
-                    if len(problematic_sequences) > 0:
-                        prob_idx = problematic_sequences[0]
-                        prob_seq = input_ids_batch[prob_idx]
-                        print(f"      Example problematic sequence {prob_idx}: {prob_seq.tolist()}")
-                        print(f"      Corresponding prompt was: '{llm_input_texts[prob_idx]}'")
-                else:
-                    print(f"      ✅ All sequences have non-padding tokens")
-            
             return result_dataproto
             
         except Exception as e:
-            print(f"   ❌ Collation failed: {e}")
             import traceback
             traceback.print_exc()
             raise
@@ -438,7 +352,8 @@ class SyncMultiTurnRollout:
                 messages[-1]["content"] += f"\nTurn {idx + 1}:\n"
                 
                 if "state" in content:
-                    enable_think = getattr(self.cfg.rollout, 'enable_think', False)
+                    # Use the first agent's enable_think setting (all agents of same type should have same setting)
+                    enable_think = getattr(self.agents[0], 'enable_think', True) if self.agents else True
                     FORMAT_PROMPT = "<think> [Your thoughts] </think> <answer> [your answer] </answer>" if enable_think else "<answer> [your answer] </answer>"
                     messages[-1]["content"] += f"State:\n{content['state']}\nYou have {content['actions_left']} actions left. Always output: {FORMAT_PROMPT} with no extra text. Strictly follow this format.\n"
                 
@@ -558,13 +473,9 @@ class SyncMultiTurnRollout:
         else:
             base_seed = seed
             
-        print(f"🎲 SyncMultiTurnRollout: Using base seed {base_seed} for {self.agent_group_num} groups")
-        
         # Generate group seeds: agents within same group share environment
         # Different groups get different environments
         group_seeds = [base_seed + group_id for group_id in range(self.agent_group_num)]
-        
-        print(f"   Group seeds: {group_seeds}")
         
         initial_env_outs = []
         
@@ -575,7 +486,7 @@ class SyncMultiTurnRollout:
             # All agents in the same group use the same seed (same environment)
             group_seed = group_seeds[group_id]
             
-            print(f"   🎮 Agent {idx} (group {group_id}) using seed: {group_seed}")
+         
             
             # Reset agent with group-specific seed
             initial_env_out = agent.reset(seed=group_seed)

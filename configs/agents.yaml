@@ -2,7 +2,8 @@
 sokobanAgent:
   agent_config:
     system_prompt: "You are a helpful AI assistant that solves Sokoban puzzles step by step."
-    prompt: "You are solving the Sokoban puzzle. You are the player and you need to push all boxes to targets. When you are right next to a box, you can push it by moving in the same direction. You cannot push a box through a wall, and you cannot pull a box. The answer should be a sequence of actions, like <answer>Right || Right || Up</answer>"
+    prompt: "You are solving the Sokoban puzzle. You are the player and you need to push all boxes to targets. When you are right next to a box, you can push it by moving in the same direction. You cannot push a box through a wall, and you cannot pull a box.\n\nIMPORTANT FORMAT REQUIREMENTS:\n- Think step by step about your strategy first\n- Then provide your actions in the exact format shown\n- Use || to separate multiple actions\n- ALWAYS use the exact format: <think>Your reasoning here</think><answer>Action1 || Action2</answer>\n\nExample response:\n<think>I need to move right twice to reach the box, then push it up to the target.</think><answer>Right || Right || Up</answer>"
+    enable_think: True  # enable thinking before answering
     max_tokens: 100
     max_turns: 5
     max_actions_per_turn: 5

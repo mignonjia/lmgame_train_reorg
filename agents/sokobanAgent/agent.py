@@ -48,12 +48,16 @@ class SokobanAgent:
         self.max_turns = self.agent_config.get('max_turns', 5)
         self.max_actions_all_turns = self.agent_config.get('max_actions_all_turns', 10)
         self.format_penalty = self.agent_config.get('format_penalty', 0.0)
+        self.enable_think = self.agent_config.get('enable_think', True)
         
         self.system_prompt = self.agent_config.get('system_prompt', "You are a helpful AI assistant that solves Sokoban puzzles step by step.")
         self.prompt = self.agent_config.get('prompt', "You are solving the Sokoban puzzle.")
         self.prompt = self._build_enhanced_prompt(self.prompt)
         
-        self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\n You have {turns_remaining} turns left."""
+        if self.enable_think:
+            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {turns_remaining} turns left. ALWAYS respond in format: <think>reasoning</think><answer>actions</answer>"""
+        else:
+            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {turns_remaining} turns left. ALWAYS respond in format: <answer>actions</answer>"""
 
         self.initialize_env()
         self.trajectory_history = []
@@ -65,7 +69,7 @@ class SokobanAgent:
         self.penalty = 0.0  # Track accumulated penalty
 
     def _build_enhanced_prompt(self, base_prompt):
-        """Build enhanced prompt with environment info."""
+        """Build enhanced prompt with environment info and emphatic format instructions."""
         enhanced_prompt = base_prompt
         
         if self.env_config.get("grid_vocab"):
@@ -75,8 +79,11 @@ class SokobanAgent:
         
         if self.env_config.get("action_lookup"):
             actions = list(self.env_config["action_lookup"].values())
-            action_lookup = f"\n\nAvailable actions: {', '.join(actions)}\nFormat: <answer>Action1 || Action2</answer>"
-            enhanced_prompt += action_lookup
+            if self.enable_think:
+                format_instruction = f"\n\nAvailable actions: {', '.join(actions)}\n\n CRITICAL FORMAT REQUIREMENT \nYou MUST respond in this EXACT format:\n<think>Your step-by-step reasoning here</think><answer>Right || Up</answer>\n\nDO NOT use any other format. DO NOT add extra text outside the tags."
+            else:
+                format_instruction = f"\n\nAvailable actions: {', '.join(actions)}\n\n CRITICAL FORMAT REQUIREMENT \nYou MUST respond in this EXACT format:\n<answer>Right || Up</answer>\n\nDO NOT use any other format. DO NOT add extra text outside the tags."
+            enhanced_prompt += format_instruction
         
         return enhanced_prompt
 
@@ -88,33 +95,16 @@ class SokobanAgent:
     def get_llm_prompts(self, env_out):
         """Convert environment outputs to LLM prompts following SyncMultiTurnRollout interface."""
         
-        print(f"         🔍 Agent {self.agent_id} get_llm_prompts called:")
-        print(f"            Current messages count: {len(self.messages)}")
-        print(f"            Current turn: {self.cur_turn}")
-        print(f"            Env out reward: {env_out.reward}")
-        print(f"            Env out state length: {len(env_out.state) if env_out.state else 0}")
-        
         # ✅ DEFENSIVE CHECK: Ensure messages are initialized
         if not hasattr(self, 'messages') or not self.messages:
-            print(f"            ⚠️  WARNING: Agent {self.agent_id} messages not initialized, auto-initializing...")
             self.messages = [
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": self.prompt}
             ]
-            print(f"            Initialized with {len(self.messages)} base messages")
-        
-        # Show current messages before adding new ones
-        print(f"            Current messages before adding new:")
-        for i, msg in enumerate(self.messages):
-            role = msg.get('role', 'unknown')
-            content = msg.get('content', '')
-            content_preview = content[:50] + '...' if len(content) > 50 else content
-            print(f"               Msg {i}: {role} - '{content_preview}'")
         
         if env_out.reward != 0.0:
             reward_msg = {"role": "user", "content": f"Reward: {env_out.reward}"}
             self.messages.append(reward_msg)
-            print(f"            Added reward message: '{reward_msg['content']}'")
         
         turn_content = self.turn_prompt_template.format(
             turn_number=self.cur_turn + 1,
@@ -123,26 +113,15 @@ class SokobanAgent:
         )
         turn_msg = {"role": "user", "content": turn_content}
         self.messages.append(turn_msg)
-        print(f"            Added turn message (length: {len(turn_content)}):")
-        print(f"               Preview: '{turn_content[:100]}{'...' if len(turn_content) > 100 else ''}'")
-        
-        print(f"            Final messages count: {len(self.messages)}")
         
         # Validate final messages before returning
         if not self.messages:
-            print(f"            ❌ CRITICAL: Messages is empty after processing!")
             # Emergency fallback
             self.messages = [
                 {"role": "system", "content": "You are a helpful AI assistant."},
                 {"role": "user", "content": "Please respond appropriately."}
             ]
-            print(f"            Used emergency fallback messages")
-        
-        # Check for empty content in messages
-        for i, msg in enumerate(self.messages):
-            if not msg.get('content') or len(msg.get('content', '').strip()) == 0:
-                print(f"            ❌ WARNING: Message {i} has empty content!")
-                print(f"               Message: {msg}")
+
         
         return self.messages
     
@@ -154,7 +133,7 @@ class SokobanAgent:
         self.cur_turn += 1
 
         # ✅ FIX: parse_model_response now returns (processed_response, actions_list)
-        processed_llm_response, actions = parse_model_response(llm_raw_response, enable_think=False)
+        processed_llm_response, actions = parse_model_response(llm_raw_response, enable_think=self.enable_think)
         
         # ✅ FIX: actions is already a list, no need to split
         # actions = [action.strip() for action in action_content.split('||') if action.strip()]
@@ -316,14 +295,11 @@ class SokobanAgent:
         if seed is None:
             # Generate a unique seed only if no seed provided
             reset_seed = random.randint(0, 1000000)
-            print(f"         🎲 Agent {self.agent_id} (group {self.group_id}) generating random seed: {reset_seed}")
         else:
             # Use the provided group seed directly - all agents in same group get same seed
             reset_seed = seed
-            print(f"         🎲 Agent {self.agent_id} (group {self.group_id}) using group seed: {reset_seed}")
             
         obs = self.env.reset(seed=reset_seed)
-        print(f"         🎮 Agent {self.agent_id} initial state: {obs[:50]}{'...' if len(obs) > 50 else ''}")
         
         self.cur_turn = 0
         

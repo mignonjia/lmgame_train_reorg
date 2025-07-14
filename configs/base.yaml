@@ -11,12 +11,11 @@ system:
 
 # ------ Rollout Configuration ------
 rollout:
-  agent_group_num: 8
-  agent_group_size: 16
+  agent_group_num: 4
+  agent_group_size: 4
   train: [sokobanAgent]
   validation: [sokobanAgent]
   truncation: left  # truncate from left (oldest tokens) to keep recent context
-  enable_think: True  # enable thinking before answering
   use_turn_scores: False  # for GAE computation
   enable_response_mask: True  # for stability
   rollout_filter_ratio: 0.25  # filter ratio for rollout selection

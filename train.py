@@ -85,7 +85,7 @@ class DummyRewardManager():
 
                 if already_print_data_sources[data_source] < self.num_examine:
                     already_print_data_sources[data_source] += 1
-                    print(sequences_str)
+
 
         # Handle return_dict parameter
         if return_dict:
@@ -232,7 +232,6 @@ class TaskRunner:
             mapping[Role.RefPolicy] = global_pool_id
 
         # Use DummyRewardManager instead of load_reward_manager
-        print("using dummy reward manager")
         reward_fn = DummyRewardManager(tokenizer=tokenizer, num_examine=0, compute_score=None)
         val_reward_fn = DummyRewardManager(tokenizer=tokenizer, num_examine=1, compute_score=None)
         resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
