@@ -366,8 +366,14 @@ class SyncMultiTurnRollout:
             loss_mask = torch.ones_like(input_ids[:, 1:], dtype=torch.float)
             response_mask = torch.ones_like(input_ids[:, 1:], dtype=torch.float)
         
-        # Build DataProto
+        # Build DataProto with proper TensorDict
         llm_inputs = DataProto()
+        
+        # Ensure all tensors are on the same device and have correct shapes
+        device = input_ids.device
+        batch_size = input_ids.shape[0]
+        
+        # Create TensorDict with proper batch_size parameter
         llm_inputs.batch = TensorDict({
             "input_ids": input_ids,
             "attention_mask": attention_mask,
@@ -376,7 +382,7 @@ class SyncMultiTurnRollout:
             "loss_mask": loss_mask,
             "rm_scores": score_tensor,
             "original_rm_scores": score_tensor,
-        }, batch_size=input_ids.shape[0])
+        }, batch_size=batch_size, device=device)
         
         # Non-tensor batch data
         llm_inputs.non_tensor_batch = {

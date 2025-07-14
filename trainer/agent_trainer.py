@@ -169,14 +169,27 @@ class AgentTrainer(RayPPOTrainer):
         mask[top_groups] = True
         mask = mask.unsqueeze(1).expand(-1, group_size).flatten()
 
-        # Filter batch tensors
+        # Filter batch tensors - maintain TensorDict structure
         filtered_batch = DataProto()
-        filtered_batch.batch = {}
+        filtered_tensor_dict = {}
+        
         for key, value in batch.batch.items():
             if isinstance(value, torch.Tensor):
-                filtered_batch.batch[key] = value[mask]
+                filtered_tensor_dict[key] = value[mask]
             else:
-                filtered_batch.batch[key] = value
+                filtered_tensor_dict[key] = value
+        
+        # Create new TensorDict with filtered tensors
+        try:
+            from tensordict import TensorDict
+            filtered_batch.batch = TensorDict(
+                filtered_tensor_dict,
+                batch_size=mask.sum().item(),
+                device=next(iter(filtered_tensor_dict.values())).device if filtered_tensor_dict else None
+            )
+        except ImportError:
+            # Fallback to regular dict if TensorDict not available
+            filtered_batch.batch = filtered_tensor_dict
 
         # Filter non-tensor batch
         filtered_batch.non_tensor_batch = {}
@@ -336,10 +349,7 @@ class AgentTrainer(RayPPOTrainer):
                             del gen_baseline_batch, gen_baseline_output
 
                     # Add UIDs after batch is populated with actual data
-                    if batch.batch is not None and len(batch.batch) > 0:
-                        # Get batch size from any tensor in the batch
-                        batch_size = next(iter(batch.batch.values())).shape[0] if batch.batch else 0
-                        batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(batch_size)], dtype=object)
+                    batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object)
 
                     batch.batch["response_mask"] = batch.batch["loss_mask"]
                     # Balance the number of valid tokens across DP ranks.
