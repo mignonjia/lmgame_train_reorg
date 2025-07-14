@@ -72,7 +72,9 @@ class AgentTrainer(RayPPOTrainer):
         
         # Create a dummy dataloader that yields empty batches
         # The actual data generation happens in _generate_multi_turn_sequences
-        class DummyDataset:
+        from torch.utils.data import Dataset
+        
+        class DummyDataset(Dataset):
             def __init__(self, total_steps):
                 self.total_steps = total_steps
                 
@@ -112,6 +114,7 @@ class AgentTrainer(RayPPOTrainer):
         super().init_workers()
         
     def init_multi_turn_rollout(self):
+        """Initialize multi-turn rollout manager."""
         # Initialize multi-turn rollout manager - agent_cls will be resolved from config
         self.multi_turn_rollout = SyncMultiTurnRollout(
             actor_rollout_wg=self.actor_rollout_wg,
@@ -223,7 +226,7 @@ class AgentTrainer(RayPPOTrainer):
 
         return filtered_batch, metrics
 
-    def _generate_multi_turn_sequences(self, gen_batch: DataProto) -> DataProto:
+    def _generate_multi_turn_sequences(self, gen_batch: DataProto) -> tuple[DataProto, dict]:
         """
         Replace single-turn generation with multi-turn rollout logic.
         
@@ -231,30 +234,83 @@ class AgentTrainer(RayPPOTrainer):
             gen_batch: DataProto containing prompts for generation (mostly metadata)
             
         Returns:
-            DataProto: Generated sequences in format compatible with PPO pipeline
+            tuple: (rollout_batch: DataProto, filter_metrics: dict)
         """
+        print(f"\n🔍 DEBUG: _generate_multi_turn_sequences called")
+        print(f"   Gen batch type: {type(gen_batch)}")
+        print(f"   Gen batch has batch: {hasattr(gen_batch, 'batch')}")
+        print(f"   Gen batch has non_tensor_batch: {hasattr(gen_batch, 'non_tensor_batch')}")
+        
         # Initialize multi-turn rollout if not already done
         if self.multi_turn_rollout is None:
+            print(f"   Initializing multi-turn rollout...")
             self.init_multi_turn_rollout()
+            print(f"   Multi-turn rollout initialized")
+        
+        # Type narrowing assertion - we know it's not None after initialization
+        assert self.multi_turn_rollout is not None, "multi_turn_rollout should be initialized"
+        
+        print(f"   Multi-turn rollout info:")
+        print(f"      Number of agents: {self.multi_turn_rollout.n_agents}")
+        print(f"      Agent group num: {self.multi_turn_rollout.agent_group_num}")  
+        print(f"      Agent group size: {self.multi_turn_rollout.agent_group_size}")
+        print(f"      Max turns: {self.multi_turn_rollout.max_turns}")
+        print(f"      Current step: {self.multi_turn_rollout.step_cnt}")
         
         # Run multi-turn rollout to get complete trajectories
-        assert self.multi_turn_rollout is not None  # Type narrowing for linter
+        print(f"   Starting multi-turn rollout...")
         final_env_outs = self.multi_turn_rollout.rollout()
+        print(f"   Multi-turn rollout completed")
+        print(f"   Final env outs type: {type(final_env_outs)}")
+        print(f"   Final env outs length: {len(final_env_outs) if final_env_outs else 0}")
+        
+        if final_env_outs:
+            done_count = sum(1 for env_out in final_env_outs if env_out.done)
+            print(f"   Done agents: {done_count}/{len(final_env_outs)}")
         
         # Build update batch containing full trajectories and rewards
         # This already returns a complete DataProto with all necessary fields
+        print(f"   Building PPO batch...")
         rollout_batch = self.multi_turn_rollout.build_ppo_batch()
+        print(f"   PPO batch built")
+        print(f"   PPO batch type: {type(rollout_batch)}")
+        print(f"   PPO batch has batch: {hasattr(rollout_batch, 'batch')}")
+        
+        if hasattr(rollout_batch, 'batch') and rollout_batch.batch is not None:
+            print(f"   PPO batch keys: {list(rollout_batch.batch.keys())}")
+            if 'input_ids' in rollout_batch.batch:
+                input_ids = rollout_batch.batch['input_ids']
+                print(f"   Input IDs shape: {input_ids.shape}")
+                
+                # Check for all-padding sequences in the final batch
+                pad_token_id = self.tokenizer.pad_token_id
+                problematic_agents = []
+                for i in range(input_ids.shape[0]):
+                    seq = input_ids[i]
+                    non_pad_count = (seq != pad_token_id).sum().item()
+                    if non_pad_count == 0:
+                        problematic_agents.append(i)
+                
+                if problematic_agents:
+                    print(f"   ❌ CRITICAL: Final PPO batch has {len(problematic_agents)} all-padding sequences!")
+                    print(f"   This will cause vLLM IndexError!")
         
         # Apply rollout filtering if enabled
         rollout_filter_ratio = getattr(self.config.rollout, 'rollout_filter_ratio', 1.0)
         if rollout_filter_ratio < 1.0:
+            print(f"   Applying rollout filtering (ratio: {rollout_filter_ratio})...")
             rollout_batch, filter_metrics = self._filter_rollout(rollout_batch)
             # Add filter metrics to batch meta_info
             if rollout_batch.meta_info is None:
                 rollout_batch.meta_info = {}
             rollout_batch.meta_info.update(filter_metrics)
+            print(f"   Rollout filtering applied")
+        else:
+            print(f"   No rollout filtering (ratio: {rollout_filter_ratio})")
+            filter_metrics = {}
         
-        # Return the complete DataProto directly - no need to rebuild it
+        print(f"   Returning rollout batch and metrics")
+        # Return the complete DataProto and metrics as tuple consistently
         return rollout_batch, filter_metrics
 
     def fit(self):
@@ -328,7 +384,10 @@ class AgentTrainer(RayPPOTrainer):
                     # generate a batch using multi-turn rollout
                     with marked_timer("gen", timing_raw, color="red"):
                         # Use multi-turn rollout instead of single-turn generation
-                        batch, metrics = self._generate_multi_turn_sequences(batch)
+                        batch, rollout_metrics = self._generate_multi_turn_sequences(gen_batch)
+                        
+                        # Add rollout metrics to training metrics
+                        metrics.update(rollout_metrics)
                         metrics.update({"train/" + key: value for key, value in batch.meta_info['metrics'].items()})
                         
                         # Handle timing info if present
@@ -362,63 +421,6 @@ class AgentTrainer(RayPPOTrainer):
                     # but might affect the loss calculation (due to the change of mini-batching).
                     # TODO: Decouple the DP balancing and mini-batching.
                     if self.config.trainer.balance_batch:
-                        # ===================== DEBUG LOGGING FOR BATCH STRUCTURE =====================
-                        print("\n" + "="*80)
-                        print("🔍 DEBUG: Batch structure before _balance_batch")
-                        print("="*80)
-                        
-                        print(f"Batch type: {type(batch)}")
-                        print(f"Batch has batch attr: {hasattr(batch, 'batch')}")
-                        print(f"Batch.batch type: {type(batch.batch) if hasattr(batch, 'batch') else 'N/A'}")
-                        
-                        if hasattr(batch, 'batch') and batch.batch is not None:
-                            print(f"Batch.batch keys: {list(batch.batch.keys()) if hasattr(batch.batch, 'keys') else 'No keys method'}")
-                            
-                            # Check if it's a TensorDict or regular dict
-                            if hasattr(batch.batch, 'batch_size'):
-                                print(f"TensorDict batch_size: {batch.batch.batch_size}")
-                                
-                            # Check key tensor shapes and types
-                            for key in ['attention_mask', 'input_ids', 'responses', 'loss_mask', 'response_mask']:
-                                if hasattr(batch.batch, 'keys') and key in batch.batch.keys():
-                                    tensor = batch.batch[key]
-                                    print(f"  {key}: shape={tensor.shape}, dtype={tensor.dtype}, device={tensor.device}")
-                                    print(f"    Sample values: {tensor.flatten()[:5].tolist()}")
-                                else:
-                                    print(f"  {key}: ❌ MISSING")
-                        else:
-                            print("❌ batch.batch is None or missing!")
-                        
-                        # Check non_tensor_batch
-                        if hasattr(batch, 'non_tensor_batch') and batch.non_tensor_batch is not None:
-                            print(f"Non-tensor batch keys: {list(batch.non_tensor_batch.keys())}")
-                            for key, value in batch.non_tensor_batch.items():
-                                print(f"  {key}: type={type(value)}, len={len(value) if hasattr(value, '__len__') else 'N/A'}")
-                        else:
-                            print("❌ non_tensor_batch is None or missing!")
-                        
-                        # Check meta_info
-                        if hasattr(batch, 'meta_info') and batch.meta_info is not None:
-                            print(f"Meta info keys: {list(batch.meta_info.keys())}")
-                        else:
-                            print("❌ meta_info is None or missing!")
-                        
-                        # Try to access attention_mask specifically (key for balance_batch)
-                        try:
-                            if hasattr(batch, 'batch') and batch.batch is not None and 'attention_mask' in batch.batch.keys():
-                                attention_mask = batch.batch['attention_mask']
-                                seq_lengths = attention_mask.sum(dim=-1)
-                                print(f"Sequence lengths from attention_mask: {seq_lengths.tolist()}")
-                            else:
-                                print("❌ Cannot compute sequence lengths - attention_mask missing")
-                        except Exception as e:
-                            print(f"❌ Error accessing attention_mask: {e}")
-                        
-                        print("="*80)
-                        print("🔍 END DEBUG LOGGING")
-                        print("="*80 + "\n")
-                        # ===================== END DEBUG LOGGING =====================
-                        
                         self._balance_batch(batch, metrics=metrics)
 
                     # compute global_valid tokens
@@ -641,6 +643,9 @@ class AgentTrainer(RayPPOTrainer):
             # Initialize multi-turn rollout if not already done
             if self.multi_turn_rollout is None:
                 self.init_multi_turn_rollout()
+            
+            # Type narrowing assertion - we know it's not None after initialization  
+            assert self.multi_turn_rollout is not None, "multi_turn_rollout should be initialized"
             
             # ✅ MODIFICATION: Call rollout() first, then build_ppo_batch() 
             final_env_outs = self.multi_turn_rollout.rollout()

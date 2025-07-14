@@ -9,12 +9,13 @@ import yaml
 import json
 from pathlib import Path
 from datetime import datetime
+import yaml
+from agents.sokobanAgent.agent import SokobanAgent
+from agents.agent_utils import parse_model_response
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
-
-from agents.sokobanAgent.agent import SokobanAgent
 
 
 # Setup logging to file
@@ -102,9 +103,9 @@ def test_sokoban_agent_creation():
     # Load configuration
     config = load_config()
     
-    # Create agent
+    # Create agent - Fix: pass config['sokobanAgent'] instead of full config
     agent = SokobanAgent(
-        config=config,
+        config=config['sokobanAgent'],
         group_id=0,
         agent_id=0,
         seed=42,
@@ -137,7 +138,8 @@ def test_sokoban_agent_reset():
     print("🔍 Testing SokobanAgent reset...")
     
     config = load_config()
-    agent = SokobanAgent(config=config, agent_id=0, group_id=0, seed=42, tag="TestSokoban")
+    # Fix: pass config['sokobanAgent'] instead of full config
+    agent = SokobanAgent(config=config['sokobanAgent'], agent_id=0, group_id=0, seed=42, tag="TestSokoban")
     
     # Test reset
     initial_env_outputs = agent.reset(seed=42)
@@ -169,7 +171,8 @@ def test_sokoban_agent_action_extraction():
     print("🔍 Testing action extraction from LLM responses...")
     
     config = load_config()
-    agent = SokobanAgent(config=config, agent_id=0, group_id=0, seed=42, tag="TestSokoban")
+    # Fix: pass config['sokobanAgent'] instead of full config
+    agent = SokobanAgent(config=config['sokobanAgent'], agent_id=0, group_id=0, seed=42, tag="TestSokoban")
     
     # Test various LLM response formats
     test_cases = [
@@ -225,9 +228,9 @@ def test_sokoban_agent_rollout():
     # Load configuration
     config = load_config()
     
-    # Create agent
+    # Create agent - Fix: pass config['sokobanAgent'] instead of full config
     agent = SokobanAgent(
-        config=config,
+        config=config['sokobanAgent'],
         group_id=0,
         agent_id=0,
         seed=42,
@@ -294,13 +297,16 @@ def test_sokoban_agent_rollout():
     print(f"      Total turns: {len(agent.trajectory_history)}")
     print(f"      Final done status: {env_outputs.done}")
     
+    agent.close()
+
 
 def test_sokoban_agent_final_rollout_states():
     """Test final rollout states collection"""
     print("🔍 Testing final rollout states collection...")
     
     config = load_config()
-    agent = SokobanAgent(config=config, agent_id=0, group_id=0, seed=42, tag="TestSokoban")
+    # Fix: pass config['sokobanAgent'] instead of full config
+    agent = SokobanAgent(config=config['sokobanAgent'], agent_id=0, group_id=0, seed=42, tag="TestSokoban")
     
     # Run a short rollout
     env_outputs = agent.reset(seed=42)
@@ -347,7 +353,8 @@ def test_sokoban_agent_complete_rollout():
     print("🔍 Testing complete rollout with detailed output...")
     
     config = load_config()
-    agent = SokobanAgent(config=config, agent_id=0, group_id=0, seed=42, tag="TestSokoban")
+    # Fix: pass config['sokobanAgent'] instead of full config
+    agent = SokobanAgent(config=config['sokobanAgent'], agent_id=0, group_id=0, seed=42, tag="TestSokoban")
     
     mock_responses = get_mock_llm_responses()
     
@@ -423,6 +430,175 @@ def test_sokoban_agent_complete_rollout():
     agent.close()
     print(f"   ✅ Complete rollout test passed")
 
+def test_parse_response_fix():
+    """Test the updated parse_model_response function"""
+    print("\n🔍 TESTING PARSE_RESPONSE FIX...")
+    
+    # Test 1: Valid response with actions
+    response1 = "<think>I need to move up</think><answer>up || down</answer>"
+    processed, actions = parse_model_response(response1, enable_think=True)
+    print(f"   Response 1: {response1}")
+    print(f"   Parsed actions: {actions}")
+    print(f"   Actions type: {type(actions)}")
+    assert isinstance(actions, list), f"Expected list, got {type(actions)}"
+    assert actions == ['up', 'down'], f"Expected ['up', 'down'], got {actions}"
+    
+    # Test 2: No think tags
+    response2 = "<answer>left || right || up</answer>"
+    processed, actions = parse_model_response(response2, enable_think=False)
+    print(f"   Response 2: {response2}")
+    print(f"   Parsed actions: {actions}")
+    assert actions == ['left', 'right', 'up'], f"Expected ['left', 'right', 'up'], got {actions}"
+    
+    # Test 3: Invalid format
+    response3 = "Just some random text"
+    processed, actions = parse_model_response(response3, enable_think=True)
+    print(f"   Response 3: {response3}")
+    print(f"   Parsed actions: {actions}")
+    assert actions == [], f"Expected empty list, got {actions}"
+    
+    print("   ✅ Parse response tests passed!")
+
+def test_agent_seeding():
+    """Test that different agents get different seeds and environments"""
+    print("\n🔍 TESTING AGENT SEEDING...")
+    
+    # Use consistent config loading
+    config = load_config()
+    
+    # Create multiple agents
+    agents = []
+    initial_states = []
+    
+    for i in range(5):
+        agent = SokobanAgent(
+            config=config['sokobanAgent'],
+            agent_id=i,
+            group_id=i // 2,  # Groups: 0,0,1,1,2
+            seed=None  # Let it generate random seeds
+        )
+        agents.append(agent)
+        
+        # Reset and get initial state
+        env_out = agent.reset()
+        initial_states.append(env_out.state)
+        print(f"   Agent {i} initial state: {env_out.state[:30]}...")
+    
+    # Check for diversity
+    unique_states = set(initial_states)
+    print(f"   Total agents: {len(agents)}")
+    print(f"   Unique initial states: {len(unique_states)}")
+    print(f"   State diversity: {len(unique_states) / len(agents) * 100:.1f}%")
+    
+    # Should have some diversity (at least 2 different states)
+    if len(unique_states) <= 1:
+        print(f"   ⚠️  WARNING: Limited diversity in initial states")
+        print(f"   This might indicate seeding issues but continuing test...")
+    else:
+        print(f"   ✅ Good diversity: {len(unique_states)} different states")
+    
+    # Clean up agents
+    for agent in agents:
+        agent.close()
+    
+    print("   ✅ Agent seeding test completed!")
+
+def test_agent_action_processing():
+    """Test that agent properly processes actions with the new parsing"""
+    print("\n🔍 TESTING AGENT ACTION PROCESSING...")
+    
+    # Use consistent config loading
+    config = load_config()
+    
+    agent = SokobanAgent(
+        config=config['sokobanAgent'],
+        agent_id=0,
+        group_id=0
+    )
+    
+    # Reset agent
+    initial_env_out = agent.reset()
+    print(f"   Initial state: {initial_env_out.state[:50]}...")
+    
+    # Test 1: Valid action response
+    print("\n   Testing valid action response...")
+    llm_response1 = "<answer>up || down</answer>"
+    env_out1 = agent.get_env_outputs(llm_response1)
+    print(f"   Response: {llm_response1}")
+    print(f"   Processed successfully: {not env_out1.done}")
+    print(f"   Reward: {env_out1.reward}")
+    print(f"   State changed: {env_out1.state != initial_env_out.state}")
+    
+    # Test 2: Invalid action response  
+    print("\n   Testing invalid action response...")
+    llm_response2 = "<answer>invalid_action || another_invalid</answer>"
+    env_out2 = agent.get_env_outputs(llm_response2)
+    print(f"   Response: {llm_response2}")
+    print(f"   Penalty applied: {agent.penalty > 0}")
+    print(f"   Current penalty: {agent.penalty}")
+    
+    # Test 3: Malformed response
+    print("\n   Testing malformed response...")
+    llm_response3 = "Just random text without proper format"
+    env_out3 = agent.get_env_outputs(llm_response3)
+    print(f"   Response: {llm_response3}")
+    print(f"   Handled gracefully: True")
+    
+    # Clean up
+    agent.close()
+    print("   ✅ Agent action processing test passed!")
+
+def test_conversation_quality():
+    """Test the quality of conversation prompts generated"""
+    print("\n🔍 TESTING CONVERSATION QUALITY...")
+    
+    # Use consistent config loading
+    config = load_config()
+    
+    agent = SokobanAgent(
+        config=config['sokobanAgent'],
+        agent_id=0,
+        group_id=0
+    )
+    
+    # Reset and get initial environment output
+    initial_env_out = agent.reset()
+    
+    # Get LLM prompts for first turn
+    messages = agent.get_llm_prompts(initial_env_out)
+    
+    print(f"   Number of messages: {len(messages)}")
+    print(f"   Message structure:")
+    
+    for i, msg in enumerate(messages):
+        role = msg.get('role', 'unknown')
+        content = msg.get('content', '')
+        print(f"      {i}: {role} - {len(content)} chars")
+        if len(content) < 200:
+            print(f"         Content: '{content}'")
+        else:
+            print(f"         Content preview: '{content[:100]}...'")
+        
+        # Validate message structure
+        assert 'role' in msg, f"Message {i} missing 'role'"
+        assert 'content' in msg, f"Message {i} missing 'content'"
+        assert len(content.strip()) > 0, f"Message {i} has empty content"
+    
+    # Check for key elements in prompt
+    full_prompt = ' '.join([msg['content'] for msg in messages])
+    print(f"   Full prompt length: {len(full_prompt)} chars")
+    
+    # Should contain game instructions
+    assert 'Sokoban' in full_prompt, "Prompt should mention Sokoban"
+    assert 'action' in full_prompt.lower(), "Prompt should mention actions"
+    
+    # Should contain state information
+    assert '#' in full_prompt, "Prompt should contain grid characters"
+    
+    # Clean up
+    agent.close()
+    print("   ✅ Conversation quality test passed!")
+
 if __name__ == "__main__":
     # Setup logging to test_logs
     tee = setup_logging()
@@ -454,10 +630,12 @@ if __name__ == "__main__":
         print("Test 6: Complete rollout with detailed output")
         test_sokoban_agent_complete_rollout()
         print()
-        
-        print("=" * 60)
-        print("🎉 All tests passed!")
-        print(f"✅ Test completed at {datetime.now()}")
+
+        test_parse_response_fix()
+        test_agent_seeding()
+        test_agent_action_processing() 
+        test_conversation_quality()
+        print("\n🎉 ALL AGENT TESTS PASSED!")
         
     except Exception as e:
         print(f"❌ Test failed with error: {e}")

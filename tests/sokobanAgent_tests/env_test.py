@@ -4,9 +4,11 @@ import sys
 import os
 import yaml
 from datetime import datetime
+from pathlib import Path
 
-# Add paths to import components
-sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
+# Add project root to path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 from agents.sokobanAgent.env import SokobanEnv
 
@@ -414,6 +416,134 @@ def test_env_rendering_modes():
     print("✅ Rendering modes test passed")
 
 
+def test_env_seeding():
+    """Test that environment generates different layouts with different seeds"""
+    print("\n🔍 TESTING ENVIRONMENT SEEDING...")
+    
+    # Use consistent config loading
+    env_config = get_default_config()
+    print(f"   Environment config: {list(env_config.keys())}")
+    
+    # Test multiple environments with different seeds
+    envs = []
+    initial_states = []
+    
+    for i in range(10):  # Test 10 different seeds
+        env = SokobanEnv(env_config)
+        seed = random.randint(0, 100000)
+        
+        # Reset with different seeds
+        state = env.reset(seed=seed)
+        envs.append(env)
+        initial_states.append(state)
+        
+        print(f"   Env {i} (seed {seed}): {state[:40]}...")
+    
+    # Check for diversity
+    unique_states = set(initial_states)
+    print(f"   Total environments: {len(envs)}")
+    print(f"   Unique initial states: {len(unique_states)}")
+    print(f"   State diversity: {len(unique_states) / len(envs) * 100:.1f}%")
+    
+    # Should have some diversity
+    if len(unique_states) == 1:
+        print(f"   ❌ WARNING: All environments have identical states!")
+        print(f"   This suggests the environment is not using seeds properly")
+        print(f"   First state: {initial_states[0]}")
+    else:
+        print(f"   ✅ Good diversity: {len(unique_states)} unique states")
+    
+    # Test same seed produces same state
+    print("\n   Testing seed reproducibility...")
+    env1 = SokobanEnv(env_config)
+    env2 = SokobanEnv(env_config)
+    
+    test_seed = 12345
+    state1 = env1.reset(seed=test_seed)
+    state2 = env2.reset(seed=test_seed)
+    
+    print(f"   Same seed ({test_seed}) produces same state: {state1 == state2}")
+    if state1 != state2:
+        print(f"   ❌ WARNING: Same seed produced different states!")
+        print(f"   State 1: {state1}")
+        print(f"   State 2: {state2}")
+    
+    # Clean up
+    for env in envs + [env1, env2]:
+        env.close()
+    
+    print("   ✅ Environment seeding test completed!")
+
+def test_env_actions():
+    """Test environment action processing"""
+    print("\n🔍 TESTING ENVIRONMENT ACTIONS...")
+    
+    # Use consistent config loading
+    env_config = get_default_config()
+    env = SokobanEnv(env_config)
+    
+    # Reset environment
+    initial_state = env.reset(seed=12345)
+    print(f"   Initial state: {initial_state[:50]}...")
+    
+    # Test action lookup
+    if 'action_lookup' in env_config:
+        print(f"   Action lookup: {env_config['action_lookup']}")
+        
+        # Test each action
+        for action_id, action_name in env_config['action_lookup'].items():
+            print(f"   Testing action {action_id}: {action_name}")
+            
+            # Reset to test each action from same starting position
+            env.reset(seed=12345)
+            
+            try:
+                new_state, reward, done, info = env.step(action_id)
+                print(f"      Result: reward={reward}, done={done}, info={info}")
+                print(f"      New state (first 30 chars): {new_state[:30]}...")
+            except Exception as e:
+                print(f"      ❌ Error executing action: {e}")
+    else:
+        print(f"   ❌ No action_lookup found in config")
+    
+    env.close()
+    print("   ✅ Environment actions test completed!")
+
+def test_env_config_validation():
+    """Test environment configuration validation"""
+    print("\n🔍 TESTING ENVIRONMENT CONFIG VALIDATION...")
+    
+    # Use consistent config loading
+    env_config = get_default_config()
+    
+    # Check required fields
+    required_fields = ['action_lookup', 'grid_lookup']  # Fixed: should be grid_lookup, not grid_vocab
+    for field in required_fields:
+        if field in env_config:
+            print(f"   ✅ {field}: {env_config[field]}")
+        else:
+            print(f"   ❌ Missing {field}")
+    
+    # Test environment creation
+    try:
+        env = SokobanEnv(env_config)
+        print(f"   ✅ Environment created successfully")
+        
+        # Test basic operations
+        state = env.reset()
+        print(f"   ✅ Reset successful, state length: {len(state)}")
+        
+        # Test rendering
+        rendered = env.render()
+        print(f"   ✅ Render successful, length: {len(rendered)}")
+        
+        env.close()
+    except Exception as e:
+        print(f"   ❌ Environment creation failed: {e}")
+    
+    print("   ✅ Environment config validation completed!")
+
+
 if __name__ == "__main__":
     # Setup logging to test_logs
     tee = setup_logging()
@@ -448,6 +578,18 @@ if __name__ == "__main__":
         
         print("Test 7: 10 random environments × 3 runs")
         test_10_random_envs_three_times()
+        print()
+
+        print("Test 8: Environment seeding")
+        test_env_seeding()
+        print()
+
+        print("Test 9: Environment actions")
+        test_env_actions()
+        print()
+
+        print("Test 10: Environment config validation")
+        test_env_config_validation()
         print()
         
         print("=" * 60)

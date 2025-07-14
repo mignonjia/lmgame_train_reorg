@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
 SyncMultiTurnRollout Test - Tests rollout logic with mocked LLM responses
+Enhanced with debugging for prompt generation issues
 """
 
 import sys
 import os
 import yaml
 import json
+import torch
 from pathlib import Path
 from datetime import datetime
 
@@ -26,7 +28,7 @@ def setup_logging():
     os.makedirs(test_logs_dir, exist_ok=True)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = os.path.join(test_logs_dir, f"sync_multi_turn_rollout_test_{timestamp}.log")
+    log_file = os.path.join(test_logs_dir, f"sync_multi_turn_rollout_debug_{timestamp}.log")
     
     class Tee:
         def __init__(self, file_path):
@@ -48,7 +50,7 @@ def setup_logging():
     tee = Tee(log_file)
     sys.stdout = tee
     
-    print(f"📝 SyncMultiTurnRollout Test log started at {datetime.now()}")
+    print(f"📝 SyncMultiTurnRollout DEBUG Test log started at {datetime.now()}")
     print(f"📄 Log file: {log_file}")
     print("=" * 70)
     
@@ -138,14 +140,442 @@ def create_real_tokenizer():
         
         print(f"✅ Real tokenizer loaded successfully")
         print(f"   Vocab size: {tokenizer.vocab_size}")
-        print(f"   Pad token: {tokenizer.pad_token}")
-        print(f"   EOS token: {tokenizer.eos_token}")
+        print(f"   Pad token: {tokenizer.pad_token} (ID: {tokenizer.pad_token_id})")
+        print(f"   EOS token: {tokenizer.eos_token} (ID: {tokenizer.eos_token_id})")
         
         return tokenizer
         
     except Exception as e:
         print(f"❌ Failed to load real tokenizer: {e}")
         raise
+
+
+def debug_tokenization(tokenizer, text, label=""):
+    """Debug helper to analyze tokenization results"""
+    print(f"\n🔍 TOKENIZATION DEBUG - {label}")
+    print("=" * 50)
+    
+    if not text or text.strip() == "":
+        print("❌ EMPTY OR WHITESPACE-ONLY TEXT!")
+        print(f"   Raw text: '{text}'")
+        print(f"   Length: {len(text)}")
+        return None, None
+    
+    print(f"Input text (first 200 chars): '{text[:200]}{'...' if len(text) > 200 else ''}'")
+    print(f"Text length: {len(text)}")
+    
+    try:
+        # Tokenize
+        tokens = tokenizer(text, return_tensors="pt", padding=True, truncation=True)
+        input_ids = tokens['input_ids']
+        attention_mask = tokens['attention_mask']
+        
+        print(f"✅ Tokenization successful")
+        print(f"   Input IDs shape: {input_ids.shape}")
+        print(f"   Attention mask shape: {attention_mask.shape}")
+        print(f"   Input IDs: {input_ids[0][:20].tolist()}{'...' if input_ids.shape[1] > 20 else ''}")
+        
+        # Check for padding-only sequences
+        non_pad_count = (input_ids != tokenizer.pad_token_id).sum().item()
+        total_tokens = input_ids.numel()
+        
+        print(f"   Non-padding tokens: {non_pad_count}/{total_tokens}")
+        print(f"   Padding ratio: {(total_tokens - non_pad_count)/total_tokens:.2%}")
+        
+        if non_pad_count == 0:
+            print("❌ ALL TOKENS ARE PADDING! This will cause vLLM IndexError!")
+            
+        # Check attention mask
+        valid_attention = attention_mask.sum().item()
+        print(f"   Valid attention positions: {valid_attention}/{attention_mask.numel()}")
+        
+        return input_ids, attention_mask
+        
+    except Exception as e:
+        print(f"❌ Tokenization failed: {e}")
+        return None, None
+
+
+def ensure_rollout_initialized(rollout):
+    """Helper to ensure rollout env_outs is initialized"""
+    if rollout.env_outs is None:
+        print("   🔄 Initializing rollout environment outputs...")
+        rollout._reset_batch_agents()
+
+
+def test_prompt_generation_debug():
+    """Debug test for prompt generation issues"""
+    print("🔍 DEBUGGING PROMPT GENERATION...")
+    print("=" * 70)
+    
+    config = load_config()
+    config_obj = create_config_object(config)
+    tokenizer = create_real_tokenizer()
+    mock_actor_wg = create_mock_actor_wg()
+    
+    rollout = SyncMultiTurnRollout(
+        actor_rollout_wg=mock_actor_wg,
+        cfg=config_obj,
+        tokenizer=tokenizer,
+        processor=None
+    )
+    
+    print(f"\n📊 INITIAL ROLLOUT STATE:")
+    print(f"   Number of agents: {rollout.n_agents}")
+    print(f"   Agent group num: {rollout.agent_group_num}")
+    print(f"   Agent group size: {rollout.agent_group_size}")
+    print(f"   Max turns: {rollout.max_turns}")
+    print(f"   Current step: {rollout.step_cnt}")
+    
+    # Initialize environment outputs
+    ensure_rollout_initialized(rollout)
+    
+    # Check initial environment outputs
+    print(f"\n📊 INITIAL ENVIRONMENT OUTPUTS:")
+    if rollout.env_outs is not None and len(rollout.env_outs) > 0:
+        for i, env_out in enumerate(rollout.env_outs[:3]):  # Show first 3
+            print(f"\n   Agent {i} Initial Env Output:")
+            print(f"      Done: {env_out.done}")
+            print(f"      Reward: {env_out.reward}")
+            print(f"      State (first 100 chars): '{env_out.state[:100]}{'...' if len(env_out.state) > 100 else ''}'")
+            print(f"      State length: {len(env_out.state)}")
+            print(f"      Info keys: {list(env_out.info.keys())}")
+    else:
+        print(f"   ❌ No environment outputs available - rollout not properly initialized!")
+        return
+    
+    # Test prompt generation step by step
+    print(f"\n🔍 TESTING PROMPT GENERATION STEP BY STEP:")
+    print("=" * 60)
+    
+    # Step 1: Test get_batch_llm_prompts
+    print(f"\n   Step 1: Testing get_batch_llm_prompts...")
+    try:
+        batch_prompts = rollout.get_batch_llm_prompts(rollout.env_outs)
+        print(f"   ✅ get_batch_llm_prompts succeeded")
+        print(f"      DataProto type: {type(batch_prompts)}")
+        print(f"      Has batch: {hasattr(batch_prompts, 'batch')}")
+        print(f"      Has non_tensor_batch: {hasattr(batch_prompts, 'non_tensor_batch')}")
+        print(f"      Has meta_info: {hasattr(batch_prompts, 'meta_info')}")
+        
+        if hasattr(batch_prompts, 'batch') and batch_prompts.batch is not None:
+            print(f"      Batch keys: {list(batch_prompts.batch.keys())}")
+            
+            # Check each tensor in detail
+            for key, tensor in batch_prompts.batch.items():
+                if hasattr(tensor, 'shape'):
+                    print(f"         {key}: shape={tensor.shape}, dtype={tensor.dtype}")
+                    
+                    # Special checks for input_ids
+                    if key == 'input_ids':
+                        print(f"            Sample input_ids[0][:20]: {tensor[0][:20].tolist()}")
+                        
+                        # Check for padding-only sequences
+                        for i in range(min(3, tensor.shape[0])):
+                            seq = tensor[i]
+                            non_pad_count = (seq != tokenizer.pad_token_id).sum().item()
+                            total_count = seq.shape[0]
+                            print(f"            Agent {i}: {non_pad_count}/{total_count} non-padding tokens")
+                            
+                            if non_pad_count == 0:
+                                print(f"            ❌ AGENT {i} HAS ALL PADDING TOKENS!")
+                            elif non_pad_count < 5:
+                                print(f"            ⚠️  AGENT {i} HAS VERY FEW NON-PADDING TOKENS!")
+                    
+                    elif key == 'attention_mask':
+                        # Check attention mask validity
+                        for i in range(min(3, tensor.shape[0])):
+                            seq = tensor[i]
+                            valid_positions = seq.sum().item()
+                            total_positions = seq.shape[0]
+                            print(f"            Agent {i}: {valid_positions}/{total_positions} valid attention positions")
+                            
+                            if valid_positions == 0:
+                                print(f"            ❌ AGENT {i} HAS NO VALID ATTENTION POSITIONS!")
+                                
+    except Exception as e:
+        print(f"   ❌ get_batch_llm_prompts failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return
+    
+    # Step 2: Test individual agent prompt generation
+    print(f"\n   Step 2: Testing individual agent prompts...")
+    for i in range(min(3, len(rollout.agents))):
+        agent = rollout.agents[i]
+        env_out = rollout.env_outs[i]
+        
+        print(f"\n      Agent {i} Individual Prompt Generation:")
+        print(f"         Agent ID: {agent.agent_id}")
+        print(f"         Group ID: {agent.group_id}")
+        print(f"         Current Turn: {agent.cur_turn}")
+        print(f"         Total Actions Consumed: {agent.total_actions_consumed}")
+        print(f"         Max Turns: {agent.max_turns}")
+        print(f"         Max Actions All Turns: {agent.max_actions_all_turns}")
+        
+        # Test agent's get_llm_prompts
+        try:
+            messages = agent.get_llm_prompts(env_out)
+            print(f"         ✅ get_llm_prompts succeeded, {len(messages)} messages")
+            
+            # Print messages structure
+            for j, msg in enumerate(messages):
+                role = msg.get('role', 'unknown')
+                content = msg.get('content', '')
+                content_preview = content[:100] + '...' if len(content) > 100 else content
+                print(f"            Message {j}: {role} - '{content_preview}'")
+                print(f"               Content length: {len(content)}")
+            
+            # Test chat template application
+            prompt_str = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            
+            # Add answer format prompt
+            enable_think = getattr(config_obj.rollout, 'enable_think', False)
+            if enable_think:
+                prompt_str += "<think>"
+            else:
+                prompt_str += "<answer>"
+            
+            print(f"         Final prompt length: {len(prompt_str)}")
+            print(f"         Final prompt (first 200 chars): '{prompt_str[:200]}{'...' if len(prompt_str) > 200 else ''}'")
+            
+            # Test tokenization of this specific prompt
+            debug_tokenization(tokenizer, prompt_str, f"Agent {i} Individual Prompt")
+                
+        except Exception as e:
+            print(f"         ❌ Agent {i} prompt generation failed: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # Step 3: Test conversation state and history
+    print(f"\n   Step 3: Testing conversation state and history...")
+    for i in range(min(3, len(rollout.agents))):
+        agent = rollout.agents[i]
+        
+        print(f"\n      Agent {i} Conversation State:")
+        print(f"         Messages count: {len(agent.messages)}")
+        print(f"         Trajectory history length: {len(agent.trajectory_history)}")
+        
+        # Print current messages
+        for j, msg in enumerate(agent.messages):
+            role = msg.get('role', 'unknown')
+            content = msg.get('content', '')
+            content_preview = content[:100] + '...' if len(content) > 100 else content
+            print(f"            Message {j}: {role} - '{content_preview}'")
+        
+        # Check if agent is in valid state
+        is_done = rollout.done_mask[i].item() if i < len(rollout.done_mask) else False
+        print(f"         Agent done status: {is_done}")
+        
+        if agent.cur_turn >= agent.max_turns:
+            print(f"         ⚠️  Agent has reached max turns ({agent.cur_turn}/{agent.max_turns})")
+        
+        if agent.total_actions_consumed >= agent.max_actions_all_turns:
+            print(f"         ⚠️  Agent has consumed max actions ({agent.total_actions_consumed}/{agent.max_actions_all_turns})")
+    
+    print(f"\n   ✅ Prompt generation debugging completed")
+    rollout.close()
+
+
+def test_edge_case_scenarios():
+    """Test edge cases that might cause empty prompts"""
+    print("🔍 TESTING EDGE CASE SCENARIOS...")
+    print("=" * 70)
+    
+    config = load_config()
+    config_obj = create_config_object(config)
+    tokenizer = create_real_tokenizer()
+    mock_actor_wg = create_mock_actor_wg()
+    
+    # Test 1: Empty conversation (EXPECTED TO FAIL)
+    print(f"\n   Test 1: Empty conversation handling...")
+    print(f"      Note: This test EXPECTS to fail - testing tokenizer behavior with empty messages")
+    try:
+        messages = []
+        prompt_str = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        debug_tokenization(tokenizer, prompt_str, "Empty Conversation")
+        print(f"   ⚠️  Unexpectedly succeeded - tokenizer handled empty messages")
+    except Exception as e:
+        print(f"   ✅ Expected failure: {e}")
+        print(f"      This confirms tokenizer correctly rejects empty message lists")
+    
+    # Test 2: Very short conversation
+    print(f"\n   Test 2: Very short conversation...")
+    try:
+        messages = [{"role": "user", "content": "Hi"}]
+        prompt_str = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        debug_tokenization(tokenizer, prompt_str, "Short Conversation")
+    except Exception as e:
+        print(f"   ❌ Short conversation test failed: {e}")
+    
+    # Test 3: Whitespace-only content
+    print(f"\n   Test 3: Whitespace-only content...")
+    try:
+        messages = [{"role": "user", "content": "   \n\t  "}]
+        prompt_str = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        debug_tokenization(tokenizer, prompt_str, "Whitespace-only Content")
+    except Exception as e:
+        print(f"   ❌ Whitespace-only content test failed: {e}")
+    
+    # Test 4: Special tokens only
+    print(f"\n   Test 4: Special tokens handling...")
+    try:
+        special_text = f"{tokenizer.pad_token}{tokenizer.eos_token}"
+        debug_tokenization(tokenizer, special_text, "Special Tokens Only")
+    except Exception as e:
+        print(f"   ❌ Special tokens test failed: {e}")
+    
+    # Test 5: Long sequence truncation
+    print(f"\n   Test 5: Long sequence truncation...")
+    try:
+        long_content = "This is a very long message. " * 200  # Make it long
+        messages = [{"role": "user", "content": long_content}]
+        prompt_str = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        debug_tokenization(tokenizer, prompt_str, "Long Sequence")
+    except Exception as e:
+        print(f"   ❌ Long sequence test failed: {e}")
+    
+    print(f"\n   ✅ Edge case testing completed")
+    print(f"      Note: Empty conversation failure is expected and confirms proper tokenizer behavior")
+
+
+def test_full_rollout_with_debugging():
+    """Test full rollout with step-by-step debugging"""
+    print("🔍 TESTING FULL ROLLOUT WITH DEBUGGING...")
+    print("=" * 70)
+    
+    config = load_config()
+    config_obj = create_config_object(config)
+    tokenizer = create_real_tokenizer()
+    mock_actor_wg = create_mock_actor_wg()
+    
+    rollout = SyncMultiTurnRollout(
+        actor_rollout_wg=mock_actor_wg,
+        cfg=config_obj,
+        tokenizer=tokenizer,
+        processor=None
+    )
+    
+    print(f"\n🚀 STARTING FULL ROLLOUT WITH STEP-BY-STEP DEBUGGING")
+    print("=" * 60)
+    
+    # Reset rollout
+    rollout._reset_batch_agents()
+    
+    # Run rollout turn by turn with debugging
+    for turn in range(rollout.max_turns):
+        print(f"\n   Turn {turn + 1}/{rollout.max_turns}")
+        print("   " + "-" * 40)
+        
+        # Check if all agents are done
+        done_count = rollout.done_mask.sum().item()
+        print(f"      Done agents: {done_count}/{rollout.n_agents}")
+        
+        if rollout.done_mask.all():
+            print(f"      All agents done, breaking early")
+            break
+        
+        # Step 1: Generate batch prompts
+        print(f"      Step 1: Generating batch prompts...")
+        try:
+            ensure_rollout_initialized(rollout)
+            batch_prompts = rollout.get_batch_llm_prompts(rollout.env_outs)
+            print(f"         ✅ Batch prompts generated successfully")
+            
+            # Validate prompts before sending to vLLM simulation
+            print(f"         Validating prompts for vLLM compatibility...")
+            
+            if hasattr(batch_prompts, 'batch') and 'input_ids' in batch_prompts.batch:
+                input_ids = batch_prompts.batch['input_ids']
+                
+                # Check each sequence for padding-only issue
+                problematic_agents = []
+                for i in range(input_ids.shape[0]):
+                    seq = input_ids[i]
+                    non_pad_count = (seq != tokenizer.pad_token_id).sum().item()
+                    
+                    if non_pad_count == 0:
+                        problematic_agents.append(i)
+                        print(f"         ❌ Agent {i}: ALL PADDING TOKENS (will cause IndexError)")
+                    elif non_pad_count < 3:
+                        print(f"         ⚠️  Agent {i}: Very few tokens ({non_pad_count})")
+                
+                if problematic_agents:
+                    print(f"         ❌ Found {len(problematic_agents)} agents with problematic prompts!")
+                    print(f"         This would cause IndexError in vLLM _pre_process_inputs")
+                    
+                    # Debug the problematic agents
+                    for agent_idx in problematic_agents[:2]:  # Show first 2
+                        print(f"\n         Debugging Agent {agent_idx}:")
+                        agent = rollout.agents[agent_idx]
+                        env_out = rollout.env_outs[agent_idx]
+                        
+                        print(f"            Agent state:")
+                        print(f"               Current turn: {agent.cur_turn}")
+                        print(f"               Done status: {rollout.done_mask[agent_idx].item()}")
+                        print(f"               Messages count: {len(agent.messages)}")
+                        print(f"               Trajectory length: {len(agent.trajectory_history)}")
+                        
+                        print(f"            Environment output:")
+                        print(f"               Done: {env_out.done}")
+                        print(f"               State length: {len(env_out.state)}")
+                        print(f"               Reward: {env_out.reward}")
+                        
+                        # Try to regenerate prompt for this agent
+                        try:
+                            agent_messages = agent.get_llm_prompts(env_out)
+                            print(f"               Generated {len(agent_messages)} messages")
+                            
+                            for j, msg in enumerate(agent_messages):
+                                content = msg.get('content', '')
+                                print(f"                  Message {j}: {msg.get('role')} - {len(content)} chars")
+                                
+                        except Exception as e:
+                            print(f"               ❌ Failed to regenerate agent messages: {e}")
+                
+            else:
+                print(f"         ❌ No input_ids found in batch prompts!")
+                
+        except Exception as e:
+            print(f"         ❌ Batch prompt generation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            break
+        
+        # Step 2: Generate sequences (mocked)
+        print(f"      Step 2: Generating LLM responses...")
+        try:
+            lm_outputs = rollout.generate_sequences(batch_prompts)
+            print(f"         ✅ LLM responses generated successfully")
+        except Exception as e:
+            print(f"         ❌ LLM response generation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            break
+        
+        # Step 3: Process outputs
+        print(f"      Step 3: Processing environment outputs...")
+        try:
+            rollout.env_outs = rollout.get_batch_env_outputs(lm_outputs)
+            print(f"         ✅ Environment outputs processed successfully")
+            
+            # Check updated environment outputs
+            new_done_count = rollout.done_mask.sum().item()
+            print(f"         Updated done agents: {new_done_count}/{rollout.n_agents}")
+            
+        except Exception as e:
+            print(f"         ❌ Environment output processing failed: {e}")
+            import traceback
+            traceback.print_exc()
+            break
+        
+        rollout.step_cnt += 1
+    
+    print(f"\n   ✅ Full rollout debugging completed")
+    print(f"      Total steps: {rollout.step_cnt}")
+    print(f"      Final done agents: {rollout.done_mask.sum().item()}/{rollout.n_agents}")
+    
+    rollout.close()
 
 
 def test_sync_multi_turn_rollout_creation():
@@ -603,31 +1033,44 @@ if __name__ == "__main__":
     tee = setup_logging()
     
     try:
-        print("🚀 Starting SyncMultiTurnRollout Tests...")
+        print("🚀 Starting SyncMultiTurnRollout DEBUG Tests...")
         print()
         
-        print("Test 1: Rollout creation")
+        print("DEBUG Test 1: Prompt generation debugging")
+        test_prompt_generation_debug()
+        print()
+        
+        print("DEBUG Test 2: Edge case scenarios")
+        test_edge_case_scenarios()
+        print()
+        
+        print("DEBUG Test 3: Full rollout with debugging")
+        test_full_rollout_with_debugging()
+        print()
+        
+        # Run original tests too
+        print("Original Test 1: Rollout creation")
         test_sync_multi_turn_rollout_creation()
         print()
         
-        print("Test 2: Full rollout process")
+        print("Original Test 2: Full rollout process")
         test_sync_multi_turn_rollout_full_rollout()
         print()
         
-        print("Test 3: Final rollout states collection")
+        print("Original Test 3: Final rollout states collection")
         test_sync_multi_turn_rollout_final_states()
         print()
         
-        print("Test 4: PPO batch building")
+        print("Original Test 4: PPO batch building")
         test_sync_multi_turn_rollout_ppo_batch()
         print()
         
-        print("Test 5: Complete rollout workflow")
+        print("Original Test 5: Complete rollout workflow")
         test_sync_multi_turn_rollout_complete()
         print()
         
         print("=" * 70)
-        print("🎉 All SyncMultiTurnRollout tests passed!")
+        print("🎉 All SyncMultiTurnRollout DEBUG tests completed!")
         print(f"✅ Test completed at {datetime.now()}")
         
     except Exception as e:

@@ -72,16 +72,15 @@ class SyncMultiTurnRollout:
 
     def _init_batch_agents(self):
         """
-        Build self.agents: List[Agent] and collect batch of agents.reset() outputs.
+        Build self.agents: List[Agent] without resetting them.
         Each agent handles its own history & recorder.
         Agents are grouped based on agent_group_size for training purposes.
-        Initializes self.done_mask and self.env_outs with initial environment states.
+        Actual reset happens in rollout() via _reset_batch_agents().
         """
         # Create agents of the same type
         if self.agent_cls is None:
             raise ValueError("agent_cls is None but trying to create agents")
         
-        # ✅ MODIFICATION: Use stored config values for consistent group assignment
         print(f"Creating {self.n_agents} agents in {self.agent_group_num} groups of size {self.agent_group_size}")
         
         # Verify the math
@@ -91,7 +90,6 @@ class SyncMultiTurnRollout:
         self.agents = []
         
         for idx in range(self.n_agents):
-            # ✅ MODIFICATION: Calculate group_id using stored agent_group_size
             group_id = idx // self.agent_group_size
             
             # Create agent with the extracted agent configuration
@@ -101,15 +99,11 @@ class SyncMultiTurnRollout:
                 group_id=group_id
             )
             
-            # Reset agent and collect initial environment output
-            initial_env_out = agent.reset()
-            
             self.agents.append(agent)
-           
-            print(f"  Agent {idx}: group_id={group_id}, initial_state_preview={initial_env_out.state[:20]}...")
         
-        # Initialize tracking structures with batch of reset outputs
+        # Initialize tracking structures - actual env_outs will be set in rollout()
         self.done_mask = torch.zeros(self.n_agents, dtype=torch.bool)
+        self.env_outs = None  # Will be initialized in _reset_batch_agents()
 
     # ─────────────────── BATCH LLM PROMPTS ───────────────────
     def get_batch_llm_prompts(self, env_outputs):
@@ -123,44 +117,126 @@ class SyncMultiTurnRollout:
         Returns:
             DataProto: Batched DataProto containing input_ids, attention_mask, position_ids
         """
+        print(f"\n🔍 DEBUG: get_batch_llm_prompts called with {len(env_outputs)} env_outputs")
+        
         llm_input_texts = []
         
         for idx, env_out in enumerate(env_outputs):
+            print(f"\n   Agent {idx} Prompt Generation:")
+            print(f"      Done status: {self.done_mask[idx]}")
+            print(f"      Env output: done={env_out.done}, reward={env_out.reward}")
+            print(f"      State length: {len(env_out.state) if env_out.state else 0}")
+            
             if self.done_mask[idx]:
                 # For done agents, use empty prompt
+                print(f"      → Using empty prompt (agent done)")
                 llm_input_texts.append("")
                 continue
                 
             agent = self.agents[idx]
+            print(f"      Agent state: turn={agent.cur_turn}, messages={len(agent.messages)}")
             
             # Each agent returns messages format
             messages = agent.get_llm_prompts(env_out)
+            print(f"      Generated {len(messages)} messages:")
+            
+            for i, msg in enumerate(messages):
+                role = msg.get('role', 'unknown')
+                content = msg.get('content', '')
+                content_preview = content[:100] + '...' if len(content) > 100 else content
+                print(f"         Msg {i}: {role} - '{content_preview}'")
+                print(f"                  Content length: {len(content)}")
             
             # Apply chat template to convert messages to text
-            prompt_str = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            try:
+                prompt_str = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                print(f"      Chat template applied, result length: {len(prompt_str)}")
+                print(f"      Prompt preview (first 200 chars): '{prompt_str[:200]}{'...' if len(prompt_str) > 200 else ''}'")
+            except Exception as e:
+                print(f"      ❌ Chat template failed: {e}")
+                prompt_str = "System error in chat template"
             
             # Add answer format prompt
             enable_think = getattr(self.cfg.rollout, 'enable_think', False)
             if enable_think:
                 prompt_str += "<think>"  # Force LLM to think before answering
+                print(f"      Added <think> suffix")
             else:
                 prompt_str += "<answer>"  # Force LLM to answer
+                print(f"      Added <answer> suffix")
+            
+            print(f"      Final prompt length: {len(prompt_str)}")
+            if len(prompt_str.strip()) == 0:
+                print(f"      ❌ WARNING: Final prompt is empty or whitespace!")
             
             llm_input_texts.append(prompt_str)
+        
+        print(f"\n🔍 DEBUG: Generated {len(llm_input_texts)} prompts for tokenization")
+        
+        # Check prompt statistics
+        empty_prompts = sum(1 for p in llm_input_texts if not p or len(p.strip()) == 0)
+        total_length = sum(len(p) for p in llm_input_texts)
+        print(f"   Empty prompts: {empty_prompts}/{len(llm_input_texts)}")
+        print(f"   Total character count: {total_length}")
+        print(f"   Average length: {total_length/len(llm_input_texts) if llm_input_texts else 0:.1f}")
         
         # Tokenize all prompts using verl_F for more universal processing
         batch_list = []
         
-        for prompt_str in llm_input_texts:
+        for i, prompt_str in enumerate(llm_input_texts):
+            print(f"\n   Tokenizing prompt {i}:")
+            print(f"      Input length: {len(prompt_str)}")
+            print(f"      Input preview: '{prompt_str[:100]}{'...' if len(prompt_str) > 100 else ''}'")
+            
+            if not prompt_str or len(prompt_str.strip()) == 0:
+                print(f"      ❌ WARNING: Empty prompt for agent {i}!")
+                prompt_str = "Please respond."  # Fallback
+                print(f"      Using fallback prompt: '{prompt_str}'")
+            
             # Use verl_F.tokenize_and_postprocess_data for consistent processing
-            input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(
-                prompt=prompt_str,
-                tokenizer=self.tokenizer,
-                max_length=self.cfg.max_prompt_length,
-                pad_token_id=self.tokenizer.pad_token_id,
-                left_pad=True,  # Left pad for batch generation
-                truncation=self.cfg.rollout.truncation
-            )
+            try:
+                input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(
+                    prompt=prompt_str,
+                    tokenizer=self.tokenizer,
+                    max_length=self.cfg.max_prompt_length,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    left_pad=True,  # Left pad for batch generation
+                    truncation=self.cfg.rollout.truncation
+                )
+                
+                print(f"      Tokenization successful:")
+                print(f"         Input IDs shape: {input_ids.shape}")
+                print(f"         Attention mask shape: {attention_mask.shape}")
+                
+                # Check for all-padding sequences
+                pad_token_id = self.tokenizer.pad_token_id
+                non_pad_count = (input_ids != pad_token_id).sum().item()
+                total_tokens = input_ids.numel()
+                
+                print(f"         Pad token ID: {pad_token_id}")
+                print(f"         Non-padding tokens: {non_pad_count}/{total_tokens}")
+                print(f"         Input IDs sample: {input_ids.flatten()[:10].tolist()}")
+                
+                if non_pad_count == 0:
+                    print(f"         ❌ CRITICAL: ALL TOKENS ARE PADDING! This will cause vLLM IndexError!")
+                    print(f"         Original prompt: '{prompt_str}'")
+                    print(f"         Full input_ids: {input_ids.flatten().tolist()}")
+                elif non_pad_count < 3:
+                    print(f"         ⚠️  WARNING: Very few non-padding tokens ({non_pad_count})")
+                
+            except Exception as e:
+                print(f"      ❌ Tokenization failed: {e}")
+                # Create emergency fallback tokens
+                fallback_text = "Please respond."
+                input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(
+                    prompt=fallback_text,
+                    tokenizer=self.tokenizer,
+                    max_length=self.cfg.max_prompt_length,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    left_pad=True,
+                    truncation=self.cfg.rollout.truncation
+                )
+                print(f"      Using emergency fallback tokenization")
             
             # Compute position ids
             from verl.utils.model import compute_position_id_with_mask
@@ -175,9 +251,52 @@ class SyncMultiTurnRollout:
             }
             batch_list.append(row_dict)
         
+        print(f"\n🔍 DEBUG: Collating {len(batch_list)} tokenized prompts")
+        
         # Use collate_fn to batch the data, then convert to DataProto
-        batch_dict = collate_fn(batch_list)
-        return DataProto.from_single_dict(batch_dict)
+        try:
+            batch_dict = collate_fn(batch_list)
+            result_dataproto = DataProto.from_single_dict(batch_dict)
+            
+            print(f"   Collation successful:")
+            print(f"      Batch keys: {list(batch_dict.keys())}")
+            
+            # Final validation of the batched data
+            if 'input_ids' in batch_dict:
+                input_ids_batch = batch_dict['input_ids']
+                print(f"      Final batch input_ids shape: {input_ids_batch.shape}")
+                
+                # Check each sequence in the batch for all-padding
+                pad_token_id = self.tokenizer.pad_token_id
+                problematic_sequences = []
+                
+                for i in range(input_ids_batch.shape[0]):
+                    seq = input_ids_batch[i]
+                    non_pad_count = (seq != pad_token_id).sum().item()
+                    if non_pad_count == 0:
+                        problematic_sequences.append(i)
+                
+                if problematic_sequences:
+                    print(f"      ❌ CRITICAL: Found {len(problematic_sequences)} all-padding sequences!")
+                    print(f"      Problematic agent indices: {problematic_sequences}")
+                    print(f"      This WILL cause vLLM IndexError!")
+                    
+                    # Show details of first problematic sequence
+                    if len(problematic_sequences) > 0:
+                        prob_idx = problematic_sequences[0]
+                        prob_seq = input_ids_batch[prob_idx]
+                        print(f"      Example problematic sequence {prob_idx}: {prob_seq.tolist()}")
+                        print(f"      Corresponding prompt was: '{llm_input_texts[prob_idx]}'")
+                else:
+                    print(f"      ✅ All sequences have non-padding tokens")
+            
+            return result_dataproto
+            
+        except Exception as e:
+            print(f"   ❌ Collation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
     # ─────────────────── BATCH ENV OUTPUTS ───────────────────
     def get_batch_env_outputs(self, lm_outputs):
@@ -190,6 +309,10 @@ class SyncMultiTurnRollout:
         Returns:
             List: Updated environment outputs from all agents
         """
+        # Ensure env_outs is initialized (should be done by _reset_batch_agents)
+        if self.env_outs is None:
+            raise RuntimeError("env_outs not initialized. Call rollout() or _reset_batch_agents() first.")
+        
         # Decode responses
         replies = self.tokenizer.batch_decode(
             lm_outputs.batch["responses"], 
@@ -340,15 +463,6 @@ class SyncMultiTurnRollout:
         )
         input_ids, attention_mask = inputs.input_ids, inputs.attention_mask
         
-        # ===================== DEBUG: Tensor Shapes =====================
-        print(f"\n[DEBUG] build_ppo_batch - After tokenization:")
-        print(f"  input_ids shape: {input_ids.shape}")
-        print(f"  attention_mask shape: {attention_mask.shape}")
-        print(f"  Number of texts tokenized: {len(llm_input_texts)}")
-        print(f"  Sample input_ids[0][:10]: {input_ids[0][:10].tolist()}")
-        print(f"  Sample input_ids[0][-10:]: {input_ids[0][-10:].tolist()}")
-        # ================================================================
-        
         # Compute position ids
         from verl.utils.model import compute_position_id_with_mask
         position_ids = compute_position_id_with_mask(attention_mask)
@@ -375,17 +489,6 @@ class SyncMultiTurnRollout:
             loss_mask = torch.ones_like(input_ids[:, 1:], dtype=torch.float)
             response_mask = torch.ones_like(input_ids[:, 1:], dtype=torch.float)
         
-        # ===================== DEBUG: Response and Mask Shapes =====================
-        responses = input_ids[:, 1:]  # remove the first token
-        print(f"\n[DEBUG] build_ppo_batch - Responses and masks:")
-        print(f"  responses shape: {responses.shape}")
-        print(f"  loss_mask shape: {loss_mask.shape}")
-        print(f"  response_mask shape: {response_mask.shape if response_mask is not None else 'None'}")
-        print(f"  score_tensor shape: {score_tensor.shape}")
-        print(f"  input_ids[:, 1:] shape: {input_ids[:, 1:].shape}")
-        print(f"  Difference input_ids vs responses: {input_ids.shape[1]} vs {responses.shape[1]} (diff: {input_ids.shape[1] - responses.shape[1]})")
-        # ========================================================================
-        
         # Build DataProto with proper TensorDict
         llm_inputs = DataProto()
         
@@ -393,25 +496,8 @@ class SyncMultiTurnRollout:
         device = input_ids.device
         batch_size = input_ids.shape[0]
         
-        # ===================== DEBUG: Final TensorDict Shapes =====================
-        final_responses = input_ids[:, 1:]  # remove the first token
-        print(f"\n[DEBUG] build_ppo_batch - Final TensorDict creation:")
-        print(f"  batch_size: {batch_size}")
-        print(f"  device: {device}")
-        print(f"  input_ids: {input_ids.shape}")
-        print(f"  attention_mask: {attention_mask.shape}")
-        print(f"  position_ids: {position_ids.shape}")
-        print(f"  final_responses: {final_responses.shape}")
-        print(f"  loss_mask: {loss_mask.shape}")
-        print(f"  score_tensor (rm_scores): {score_tensor.shape}")
-        print(f"  Token count mismatch check:")
-        print(f"    input_ids tokens: {input_ids.shape[1]}")
-        print(f"    responses tokens: {final_responses.shape[1]}")
-        print(f"    loss_mask tokens: {loss_mask.shape[1]}")
-        print(f"    score_tensor tokens: {score_tensor.shape[1]}")
-        # ======================================================================
-        
         # Create TensorDict with proper batch_size parameter
+        final_responses = input_ids[:, 1:]  # remove the first token
         llm_inputs.batch = TensorDict({
             "input_ids": input_ids,
             "attention_mask": attention_mask,
@@ -455,21 +541,45 @@ class SyncMultiTurnRollout:
 
     # ─────────────────── LIFECYCLE MANAGEMENT ───────────────────
 
-    def _reset_batch_agents(self):
+    def _reset_batch_agents(self, seed=None):
         """
         Reset all agents and collect the batch of initial env outputs.
         This function resets the rollout manager for new epoch/rollout.
+        
+        Args:
+            seed: Optional base seed for reproducibility. If None, generates random seed.
         """
+        import random
+        
+        # Generate base seed following reference implementation pattern
+        if seed is None:
+            # Generate random seed for training, consistent seed for validation  
+            base_seed = random.randint(0, 1000000)
+        else:
+            base_seed = seed
+            
+        print(f"🎲 SyncMultiTurnRollout: Using base seed {base_seed} for {self.agent_group_num} groups")
+        
+        # Generate group seeds: agents within same group share environment
+        # Different groups get different environments
+        group_seeds = [base_seed + group_id for group_id in range(self.agent_group_num)]
+        
+        print(f"   Group seeds: {group_seeds}")
+        
         initial_env_outs = []
         
         for idx in range(self.n_agents):
             agent = self.agents[idx]
+            group_id = idx // self.agent_group_size
             
-            # Reset agent and collect initial environment output
-            initial_env_out = agent.reset()
+            # All agents in the same group use the same seed (same environment)
+            group_seed = group_seeds[group_id]
+            
+            print(f"   🎮 Agent {idx} (group {group_id}) using seed: {group_seed}")
+            
+            # Reset agent with group-specific seed
+            initial_env_out = agent.reset(seed=group_seed)
             initial_env_outs.append(initial_env_out)
-            
-            print(f"  Reset Agent {idx}: initial_state_preview={initial_env_out.state[:20]}...")
         
         # Update tracking structures with batch of reset outputs
         self.done_mask = torch.zeros(self.n_agents, dtype=torch.bool)
@@ -477,12 +587,15 @@ class SyncMultiTurnRollout:
         self.step_cnt = 0
 
         
-    def reset(self):
+    def reset(self, seed=None):
         """
         Public reset method for external use (e.g., called by trainer between epochs).
         Delegates to _reset_batch_agents() for actual reset logic.
+        
+        Args:
+            seed: Optional base seed for reproducibility
         """
-        self._reset_batch_agents()
+        self._reset_batch_agents(seed=seed)
 
     def close(self):
         """

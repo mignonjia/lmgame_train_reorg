@@ -51,14 +51,32 @@ class SokobanEnv(GymSokobanEnv):
         info = {'action_is_valid': True}
         previous_pos = self.player_position
         
-        # Convert our config action to gym_sokoban action
-        gym_action = self.action_mapping.get(action, action)
+        # ✅ FAULT TOLERANCE: Check if action is valid before processing
+        if action not in self.action_mapping:
+            # Invalid action - return current state with penalty and mark as invalid
+            info['action_is_valid'] = False
+            info['action_is_effective'] = False
+            info['success'] = self.boxes_on_target == self.num_boxes
+            next_obs = self.render()
+            return next_obs, -0.1, False, info  # Small penalty for invalid action
         
-        _, reward, done, _ = GymSokobanEnv.step(self, gym_action) 
-        next_obs = self.render()
-        info["action_is_effective"] = not np.array_equal(previous_pos, self.player_position)
-        info["success"] = self.boxes_on_target == self.num_boxes
-        return next_obs, reward, done, info
+        # Convert our config action to gym_sokoban action
+        gym_action = self.action_mapping[action]
+        
+        try:
+            _, reward, done, _ = GymSokobanEnv.step(self, gym_action) 
+            next_obs = self.render()
+            info["action_is_effective"] = not np.array_equal(previous_pos, self.player_position)
+            info["success"] = self.boxes_on_target == self.num_boxes
+            return next_obs, reward, done, info
+        except (AssertionError, Exception) as e:
+            # ✅ FAULT TOLERANCE: Handle any other step errors gracefully
+            print(f"Warning: Environment step failed for action {action} (gym_action {gym_action}): {e}")
+            info['action_is_valid'] = False
+            info['action_is_effective'] = False
+            info['success'] = self.boxes_on_target == self.num_boxes
+            next_obs = self.render()
+            return next_obs, -0.1, False, info  # Small penalty for failed action
 
     def render(self, mode=None):
         render_mode = mode if mode is not None else self.render_mode

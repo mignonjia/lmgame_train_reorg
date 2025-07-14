@@ -57,7 +57,10 @@ class SokobanAgent:
 
         self.initialize_env()
         self.trajectory_history = []
-        self.messages = []
+        self.messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": self.prompt}
+        ]
         self.total_actions_consumed = 0
         self.penalty = 0.0  # Track accumulated penalty
 
@@ -84,15 +87,62 @@ class SokobanAgent:
     # ─────────────────── LLM INTERFACE ───────────────────
     def get_llm_prompts(self, env_out):
         """Convert environment outputs to LLM prompts following SyncMultiTurnRollout interface."""
+        
+        print(f"         🔍 Agent {self.agent_id} get_llm_prompts called:")
+        print(f"            Current messages count: {len(self.messages)}")
+        print(f"            Current turn: {self.cur_turn}")
+        print(f"            Env out reward: {env_out.reward}")
+        print(f"            Env out state length: {len(env_out.state) if env_out.state else 0}")
+        
+        # ✅ DEFENSIVE CHECK: Ensure messages are initialized
+        if not hasattr(self, 'messages') or not self.messages:
+            print(f"            ⚠️  WARNING: Agent {self.agent_id} messages not initialized, auto-initializing...")
+            self.messages = [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": self.prompt}
+            ]
+            print(f"            Initialized with {len(self.messages)} base messages")
+        
+        # Show current messages before adding new ones
+        print(f"            Current messages before adding new:")
+        for i, msg in enumerate(self.messages):
+            role = msg.get('role', 'unknown')
+            content = msg.get('content', '')
+            content_preview = content[:50] + '...' if len(content) > 50 else content
+            print(f"               Msg {i}: {role} - '{content_preview}'")
+        
         if env_out.reward != 0.0:
-            self.messages.append({"role": "user", "content": f"Reward: {env_out.reward}"})
+            reward_msg = {"role": "user", "content": f"Reward: {env_out.reward}"}
+            self.messages.append(reward_msg)
+            print(f"            Added reward message: '{reward_msg['content']}'")
         
         turn_content = self.turn_prompt_template.format(
             turn_number=self.cur_turn + 1,
             state=env_out.state,
             turns_remaining=self.max_turns - self.cur_turn
         )
-        self.messages.append({"role": "user", "content": turn_content})
+        turn_msg = {"role": "user", "content": turn_content}
+        self.messages.append(turn_msg)
+        print(f"            Added turn message (length: {len(turn_content)}):")
+        print(f"               Preview: '{turn_content[:100]}{'...' if len(turn_content) > 100 else ''}'")
+        
+        print(f"            Final messages count: {len(self.messages)}")
+        
+        # Validate final messages before returning
+        if not self.messages:
+            print(f"            ❌ CRITICAL: Messages is empty after processing!")
+            # Emergency fallback
+            self.messages = [
+                {"role": "system", "content": "You are a helpful AI assistant."},
+                {"role": "user", "content": "Please respond appropriately."}
+            ]
+            print(f"            Used emergency fallback messages")
+        
+        # Check for empty content in messages
+        for i, msg in enumerate(self.messages):
+            if not msg.get('content') or len(msg.get('content', '').strip()) == 0:
+                print(f"            ❌ WARNING: Message {i} has empty content!")
+                print(f"               Message: {msg}")
         
         return self.messages
     
@@ -103,9 +153,11 @@ class SokobanAgent:
         self.messages.append({"role": "assistant", "content": llm_raw_response})
         self.cur_turn += 1
 
-        processed_llm_response, action_content = parse_model_response(llm_raw_response, enable_think=False)
+        # ✅ FIX: parse_model_response now returns (processed_response, actions_list)
+        processed_llm_response, actions = parse_model_response(llm_raw_response, enable_think=False)
         
-        actions = [action.strip() for action in action_content.split('||') if action.strip()]
+        # ✅ FIX: actions is already a list, no need to split
+        # actions = [action.strip() for action in action_content.split('||') if action.strip()]
 
         obs = self.env.render()
         total_reward = 0
@@ -122,11 +174,19 @@ class SokobanAgent:
             try:
                 if action_str in action_lookup_reverse:
                     action = action_lookup_reverse[action_str]
-                    valid_actions.append(action)
+                    # ✅ FAULT TOLERANCE: Validate action is in expected range
+                    if action in self.env_config['action_lookup']:
+                        valid_actions.append(action)
+                    else:
+                        invalid_actions.append(action_str)
                 else:
                     action = int(action_str)
-                    valid_actions.append(action)
-            except (ValueError, KeyError) as e:
+                    # ✅ FAULT TOLERANCE: Validate numeric action is in expected range  
+                    if action in self.env_config['action_lookup']:
+                        valid_actions.append(action)
+                    else:
+                        invalid_actions.append(action_str)
+            except (ValueError, KeyError, TypeError) as e:
                 invalid_actions.append(action_str)
                 continue
         
@@ -134,14 +194,20 @@ class SokobanAgent:
         if invalid_actions or len(valid_actions) != len(actions):
             self.penalty += self.format_penalty
         
-        # Execute valid actions
+        # Execute valid actions with fault tolerance
         for action in valid_actions:
-            obs, reward, done, step_info = self.env.step(action)
-            total_reward += reward
-            executed_actions.append(action)
-            info.update(step_info)  # Update info with step info
-            if done:
-                break
+            try:
+                obs, reward, done, step_info = self.env.step(action)
+                total_reward += reward
+                executed_actions.append(action)
+                info.update(step_info)  # Update info with step info
+                if done:
+                    break
+            except Exception as e:
+                # ✅ FAULT TOLERANCE: Handle any environment step errors
+                print(f"Warning: Agent {self.agent_id} step failed for action {action}: {e}")
+                # Continue with next action instead of crashing
+                continue
         
         # Update total actions consumed
         self.total_actions_consumed += len(executed_actions)
@@ -244,8 +310,21 @@ class SokobanAgent:
     # ─────────────────── LIFECYCLE MANAGEMENT ───────────────────
     def reset(self, seed=None):
         """Reset agent state for new episode and return initial environment outputs."""
-        reset_seed = seed if seed is not None else self.seed
+        # ✅ FIX: Implement group-based seeding following reference implementation
+        # Agents within the same group should have the same environment (same seed)
+        # Different groups should have different environments (different seeds)
+        if seed is None:
+            # Generate a unique seed only if no seed provided
+            reset_seed = random.randint(0, 1000000)
+            print(f"         🎲 Agent {self.agent_id} (group {self.group_id}) generating random seed: {reset_seed}")
+        else:
+            # Use the provided group seed directly - all agents in same group get same seed
+            reset_seed = seed
+            print(f"         🎲 Agent {self.agent_id} (group {self.group_id}) using group seed: {reset_seed}")
+            
         obs = self.env.reset(seed=reset_seed)
+        print(f"         🎮 Agent {self.agent_id} initial state: {obs[:50]}{'...' if len(obs) > 50 else ''}")
+        
         self.cur_turn = 0
         
         self.trajectory_history = []
