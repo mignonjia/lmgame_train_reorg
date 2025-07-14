@@ -5,7 +5,7 @@ import random
 import yaml
 from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass
-from agents.agent_utils import Trajectory, parse_model_response
+from agents.agent_utils import Trajectory
 from agents.sokobanAgent.env import SokobanEnv
 from agents import register_agent
 
@@ -47,6 +47,7 @@ class SokobanAgent:
 
         self.max_turns = self.agent_config.get('max_turns', 5)
         self.max_actions_all_turns = self.agent_config.get('max_actions_all_turns', 10)
+        self.max_actions_per_turn = self.agent_config.get('max_actions_per_turn', 5)
         self.format_penalty = self.agent_config.get('format_penalty', 0.0)
         self.enable_think = self.agent_config.get('enable_think', True)
         
@@ -55,9 +56,11 @@ class SokobanAgent:
         self.prompt = self._build_enhanced_prompt(self.prompt)
         
         if self.enable_think:
-            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {turns_remaining} turns left. ALWAYS respond in format: <think>reasoning</think><answer>actions</answer>"""
+            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {turns_remaining} turns left. ALWAYS respond in format: <think>reasoning</think><answer>actions</answer>
+                                        Example: <think>I need to move right to reach the box, then push it up to the target.</think><answer>Right || Up</answer>"""
         else:
-            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {turns_remaining} turns left. ALWAYS respond in format: <answer>actions</answer>"""
+            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {turns_remaining} turns left. ALWAYS respond in format: <answer>actions</answer>
+                                        Example: <answer>Right || Up</answer>"""
 
         self.initialize_env()
         self.trajectory_history = []
@@ -74,22 +77,64 @@ class SokobanAgent:
         
         if self.env_config.get("grid_vocab"):
             symbols = [f"{k}: {v}" for k, v in self.env_config["grid_vocab"].items()]
-            grid_vocab = f"\n\nGrid symbols: {', '.join(symbols)}"
+            grid_vocab = f"\nThe meaning of each symbol in the state is:\n {', '.join(symbols)}"
             enhanced_prompt += grid_vocab
         
         if self.env_config.get("action_lookup"):
             actions = list(self.env_config["action_lookup"].values())
-            if self.enable_think:
-                format_instruction = f"\n\nAvailable actions: {', '.join(actions)}\n\n CRITICAL FORMAT REQUIREMENT \nYou MUST respond in this EXACT format:\n<think>Your step-by-step reasoning here</think><answer>Right || Up</answer>\n\nDO NOT use any other format. DO NOT add extra text outside the tags."
-            else:
-                format_instruction = f"\n\nAvailable actions: {', '.join(actions)}\n\n CRITICAL FORMAT REQUIREMENT \nYou MUST respond in this EXACT format:\n<answer>Right || Up</answer>\n\nDO NOT use any other format. DO NOT add extra text outside the tags."
-            enhanced_prompt += format_instruction
-        
+            action_lookup_str = "\nYour available actions are:\n" + ", ".join(actions)
+            enhanced_prompt += action_lookup_str
+            
         return enhanced_prompt
 
     def initialize_env(self):
         """Initialize the Sokoban environment."""
         self.env = SokobanEnv(self.env_config)
+
+    def _debug_print_messages(self, context=""):
+        """Helper method to systematically print messages for debugging."""
+        print(f"\n{'='*80}")
+        print(f"DEBUG MESSAGES [{context}] - Agent {self.agent_id}, Turn {self.cur_turn}")
+        print(f"{'='*80}")
+        
+        if not hasattr(self, 'messages') or not self.messages:
+            print("❌ ERROR: No messages found!")
+            return
+        
+        print(f"Total messages: {len(self.messages)}")
+        print(f"Enable think: {self.enable_think}")
+        print(f"Current turn: {self.cur_turn}")
+        print(f"Max turns: {self.max_turns}")
+        print(f"Actions consumed: {self.total_actions_consumed}/{self.max_actions_all_turns}")
+        print("-" * 80)
+        
+        for i, msg in enumerate(self.messages):
+            role = msg.get('role', 'unknown')
+            content = msg.get('content', '')
+            
+            print(f"Message {i+1}: [{role.upper()}]")
+            
+            # Truncate very long content for readability
+            content_preview = content
+                
+            print(f"  Content: {repr(content_preview)}")
+            print(f"  Length: {len(content)} chars")
+            
+            # Special handling for assistant messages to show parsing
+            if role == 'assistant':
+                try:
+                    processed_response, actions = self.parse_model_response(content, self.enable_think)
+                    print(f"  Parsed actions: {actions}")
+                    print(f"  Action count: {len(actions)}")
+                except Exception as e:
+                    print(f"  ❌ Parse error: {e}")
+            
+            print("-" * 40)
+        
+        # Print current Sokoban layout
+        current_layout = self.env.render()
+        print(f"Current Sokoban Layout:\n{current_layout}")
+        print(f"{'='*80}\n")
 
     # ─────────────────── LLM INTERFACE ───────────────────
     def get_llm_prompts(self, env_out):
@@ -122,21 +167,70 @@ class SokobanAgent:
                 {"role": "user", "content": "Please respond appropriately."}
             ]
 
+        # ✅ DEBUG: Print messages systematically
+        self._debug_print_messages(f"GET_LLM_PROMPTS")
         
         return self.messages
-    
+
+    def parse_model_response(self, llm_response, enable_think=True):
+        """
+        Parse model response into processed llm_response and action list.
+        Simple parsing that handles enable_think cases and limits actions to max_actions_per_turn.
+        
+        Args:
+            llm_response: Raw LLM response string
+            enable_think: Whether to expect <think> tags
+            
+        Returns:
+            Tuple[str, List[str]]: (processed_llm_response, actions_list)
+        """
+        import re
+        
+        # Define pattern based on enable_think
+        pattern = r'<think>(.*?)</think>\s*<answer>(.*?)</answer>' if enable_think else r'<answer>(.*?)</answer>'
+        match = re.search(pattern, llm_response, re.DOTALL)
+        
+        if not match:
+            # No valid pattern found, return original response with empty actions
+            processed_response, actions = llm_response, []
+        else:
+            if enable_think:
+                think_content, action_content = match.group(1), match.group(2)
+            else:
+                think_content, action_content = "", match.group(1)
+            
+            # Clean up special tokens
+            special_tokens = ["<think>", "</think>", "<answer>", "</answer>", "<|im_start|>", "<|im_end|>"]
+            for special_token in special_tokens:
+                action_content = action_content.replace(special_token, "").strip()
+                think_content = think_content.replace(special_token, "").strip()
+            
+            # Parse actions using || separator
+            actions = [action.strip() for action in action_content.split("||") if action.strip()]
+            
+            # Limit actions to max_actions_per_turn
+            if len(actions) > self.max_actions_per_turn:
+                actions = actions[:self.max_actions_per_turn]  # Only the first MAX_ACTIONS actions are kept
+                action_content = " || ".join(actions)
+            
+            # Reconstruct properly formatted response
+            if enable_think:
+                processed_response = f"<think>{think_content}</think><answer>{action_content}</answer>"
+            else:
+                processed_response = f"<answer>{action_content}</answer>"
+        
+        return processed_response, actions
+
     def get_env_outputs(self, llm_response):
         """Process LLM outputs and get environment outputs."""
         llm_raw_response = llm_response
         
-        self.messages.append({"role": "assistant", "content": llm_raw_response})
+       
         self.cur_turn += 1
 
-        # ✅ FIX: parse_model_response now returns (processed_response, actions_list)
-        processed_llm_response, actions = parse_model_response(llm_raw_response, enable_think=self.enable_think)
-        
-        # ✅ FIX: actions is already a list, no need to split
-        # actions = [action.strip() for action in action_content.split('||') if action.strip()]
+        processed_llm_response, actions = self.parse_model_response(llm_raw_response, enable_think=self.enable_think)
+
+        self.messages.append({"role": "assistant", "content": processed_llm_response})
 
         obs = self.env.render()
         total_reward = 0
