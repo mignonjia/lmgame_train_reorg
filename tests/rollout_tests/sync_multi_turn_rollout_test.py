@@ -130,9 +130,9 @@ def create_real_tokenizer():
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B")
         
         # Ensure pad token is set
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        
         # Apply mock tokenizer decode for testing
         tokenizer = create_mock_tokenizer_decode(tokenizer)
         
@@ -156,18 +156,90 @@ def test_sync_multi_turn_rollout_creation():
     config = load_config()
     config_obj = create_config_object(config)
     
-    # Debug: Print config structure
-    print(f"   📊 Config debug info:")
+    # Debug: Print detailed config structure
+    print(f"   📊 DETAILED CONFIG DEBUG INFO:")
     print(f"      Config type: {type(config_obj)}")
-    print(f"      Has 'train' attr: {hasattr(config_obj, 'train')}")
-    print(f"      Train value: {getattr(config_obj, 'train', 'NOT_FOUND')}")
-    print(f"      Has 'sokobanAgent' attr: {hasattr(config_obj, 'sokobanAgent')}")
-    print(f"      sokobanAgent value: {getattr(config_obj, 'sokobanAgent', 'NOT_FOUND')}")
+    print(f"      Config top-level keys: {list(config_obj._original_dict.keys()) if hasattr(config_obj, '_original_dict') else 'NO_DICT'}")
+    
+    # Check required config values for sync_multi_turn_rollout
+    required_configs = {
+        'max_prompt_length': 'cfg.max_prompt_length',
+        'rollout.truncation': 'cfg.rollout.truncation',
+        'rollout.agent_batch_size': 'cfg.rollout.agent_batch_size',
+        'rollout.train': 'cfg.rollout.train',
+        'rollout.enable_think': 'cfg.rollout.enable_think',
+        'rollout.use_turn_scores': 'cfg.rollout.use_turn_scores',
+        'rollout.enable_response_mask': 'cfg.rollout.enable_response_mask',
+    }
+    
+    print(f"\n      📋 REQUIRED CONFIG CHECK:")
+    for config_path, access_path in required_configs.items():
+        try:
+            if '.' in config_path:
+                # Handle nested config access
+                parts = config_path.split('.')
+                current_obj = config_obj
+                for part in parts:
+                    current_obj = getattr(current_obj, part)
+                value = current_obj
+                status = "✅ FOUND"
+            else:
+                # Handle top-level config access
+                value = getattr(config_obj, config_path)
+                status = "✅ FOUND"
+        except AttributeError as e:
+            value = f"❌ MISSING: {str(e)}"
+            status = "❌ MISSING"
+        
+        print(f"         {access_path}: {value} ({status})")
+    
+    # Check rollout config in detail
+    print(f"\n      📋 ROLLOUT CONFIG DETAILS:")
+    if hasattr(config_obj, 'rollout'):
+        rollout_config = getattr(config_obj, 'rollout')
+        print(f"         Type: {type(rollout_config)}")
+        print(f"         Keys: {list(rollout_config._original_dict.keys()) if hasattr(rollout_config, '_original_dict') else 'NO_DICT'}")
+        
+        # Check each rollout attribute
+        rollout_attrs = ['agent_batch_size', 'agent_group_size', 'train', 'validation', 'truncation', 'enable_think', 'use_turn_scores', 'enable_response_mask']
+        for attr in rollout_attrs:
+            try:
+                value = getattr(rollout_config, attr)
+                print(f"         {attr}: {value} (✅ FOUND)")
+            except AttributeError:
+                print(f"         {attr}: ❌ MISSING")
+    else:
+        print(f"         ❌ NO ROLLOUT CONFIG FOUND!")
+    
+    # Check sokobanAgent config
+    print(f"\n      📋 SOKOBAN AGENT CONFIG:")
     if hasattr(config_obj, 'sokobanAgent'):
         sokoban_config = getattr(config_obj, 'sokobanAgent')
-        print(f"      sokobanAgent type: {type(sokoban_config)}")
-        print(f"      sokobanAgent keys: {list(sokoban_config._original_dict.keys()) if hasattr(sokoban_config, '_original_dict') else 'NO_DICT'}")
-        print(f"      sokobanAgent _original_dict: {sokoban_config._original_dict if hasattr(sokoban_config, '_original_dict') else 'NO_DICT'}")
+        print(f"         Type: {type(sokoban_config)}")
+        print(f"         Keys: {list(sokoban_config._original_dict.keys()) if hasattr(sokoban_config, '_original_dict') else 'NO_DICT'}")
+        
+        # Check agent_config nested structure
+        if hasattr(sokoban_config, 'agent_config'):
+            agent_config = sokoban_config.agent_config
+            print(f"         agent_config type: {type(agent_config)}")
+            print(f"         agent_config keys: {list(agent_config._original_dict.keys()) if hasattr(agent_config, '_original_dict') else 'NO_DICT'}")
+            
+            # Check max_turns specifically
+            try:
+                max_turns = agent_config.max_turns
+                print(f"         max_turns: {max_turns} (✅ FOUND)")
+            except AttributeError:
+                print(f"         max_turns: ❌ MISSING")
+        else:
+            print(f"         ❌ NO AGENT_CONFIG FOUND!")
+    else:
+        print(f"         ❌ NO SOKOBAN AGENT CONFIG FOUND!")
+    
+    # Show what we have vs what we need
+    print(f"\n      🔍 CONFIG AVAILABILITY SUMMARY:")
+    print(f"         Available top-level keys: {list(config_obj._original_dict.keys()) if hasattr(config_obj, '_original_dict') else 'NONE'}")
+    print(f"         Need for rollout: max_prompt_length, rollout.truncation, rollout.agent_batch_size, etc.")
+    print(f"         Need for agents: sokobanAgent.agent_config.max_turns")
     
     # Create real tokenizer
     tokenizer = create_real_tokenizer()
@@ -183,17 +255,18 @@ def test_sync_multi_turn_rollout_creation():
         processor=None  # Not used in our tests
     )
     
-    # Verify creation
+    # Verify creation - now use rollout config structure
     assert rollout.cfg == config_obj
     assert rollout.tokenizer == tokenizer
     assert rollout.actor_wg == mock_actor_wg
-    assert rollout.n_agents == config['agent_batch_size']
-    assert len(rollout.agents) == config['agent_batch_size']
+    assert rollout.n_agents == config['rollout']['agent_batch_size']
+    assert len(rollout.agents) == config['rollout']['agent_batch_size']
     assert rollout.step_cnt == 0
     
     print(f"✅ SyncMultiTurnRollout created successfully")
     print(f"   Number of agents: {rollout.n_agents}")
     print(f"   Agent class: {rollout.agent_cls}")
+    print(f"   Max turns: {rollout.max_turns}")
     print(f"   Step count: {rollout.step_cnt}")
     
     rollout.close()
