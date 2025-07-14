@@ -56,7 +56,7 @@ class SokobanAgent:
         self.prompt = self._build_enhanced_prompt(self.prompt)
         
         if self.enable_think:
-            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {turns_remaining} turns left. ALWAYS respond in format: <think>reasoning</think><answer>actions</answer>
+            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {turns_remaining} turns left. ALWAYS respond in a format: <think>reasoning</think><answer>actions</answer>
                                         Example: <think>I need to move right to reach the box, then push it up to the target.</think><answer>Right || Up</answer>"""
         else:
             self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {turns_remaining} turns left. ALWAYS respond in format: <answer>actions</answer>
@@ -64,6 +64,7 @@ class SokobanAgent:
 
         self.initialize_env()
         self.trajectory_history = []
+        self.raw_response_list = []  # Store all raw LLM responses for debugging
         self.messages = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": self.prompt}
@@ -107,6 +108,8 @@ class SokobanAgent:
         print(f"Max turns: {self.max_turns}")
         print(f"Actions consumed: {self.total_actions_consumed}/{self.max_actions_all_turns}")
         print("-" * 80)
+
+        raw_response_count = 0
         
         for i, msg in enumerate(self.messages):
             role = msg.get('role', 'unknown')
@@ -116,7 +119,10 @@ class SokobanAgent:
             
             # Truncate very long content for readability
             content_preview = content
-                
+            if role.upper() == "ASSISTANT":
+                if raw_response_count < len(self.raw_response_list):
+                    print(f"Raw Response: {self.raw_response_list[raw_response_count]}")
+                    raw_response_count += 1
             print(f"  Content: {repr(content_preview)}")
             print(f"  Length: {len(content)} chars")
             
@@ -224,6 +230,9 @@ class SokobanAgent:
     def get_env_outputs(self, llm_response):
         """Process LLM outputs and get environment outputs."""
         llm_raw_response = llm_response
+
+        # store raw response for debugging
+        self.raw_response_list.append(llm_raw_response)
         
        
         self.cur_turn += 1
@@ -263,8 +272,8 @@ class SokobanAgent:
                 invalid_actions.append(action_str)
                 continue
         
-        # Apply penalty for invalid actions
-        if invalid_actions or len(valid_actions) != len(actions):
+        # Apply penalty for invalid actions OR no actions extracted
+        if len(actions) == 0 or invalid_actions or len(valid_actions) != len(actions):
             self.penalty += self.format_penalty
         
         # Execute valid actions with fault tolerance
@@ -398,6 +407,7 @@ class SokobanAgent:
         self.cur_turn = 0
         
         self.trajectory_history = []
+        self.raw_response_list = []
         self.total_actions_consumed = 0
         self.penalty = 0.0  # Reset penalty for new episode
 
