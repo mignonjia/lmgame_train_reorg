@@ -51,6 +51,8 @@ class SokobanAgent:
         self.max_tokens = self.agent_config.get('max_tokens', 100)
         self.format_penalty = self.agent_config.get('format_penalty', 0.0)
         self.enable_think = self.agent_config.get('enable_think', True)
+
+        self.action_separator = self.agent_config.get('action_separator', "||")
         
         self.system_prompt = self.agent_config.get('system_prompt', "You are a helpful AI assistant that solves Sokoban puzzles step by step.")
         self.prompt = self.agent_config.get('prompt', "You are solving the Sokoban puzzle.")
@@ -85,8 +87,8 @@ class SokobanAgent:
             action_lookup_str = "\nYour available actions are:\n" + ", ".join(actions)
             enhanced_prompt += action_lookup_str
 
-        enhanced_prompt += f"\n\nGame Rules:\n- You have {self.max_turns} turns to solve this puzzle\n- Each turn you can make up to {self.max_actions_per_turn} actions\n- Total actions allowed across all turns: {self.max_actions_all_turns}\n- Separate multiple actions with ' || ' (e.g., 'Up || Right || Down')"
-
+        # enhanced_prompt += f"\n\nGame Rules:\n- You have {self.max_turns} turns to solve this puzzle\n- Each turn you can make up to {self.max_actions_per_turn} actions\n- Total actions allowed across all turns: {self.max_actions_all_turns}\n- Separate multiple actions with ' || ' (e.g., 'Up || Right || Down')"
+        enhanced_prompt += f"\nYou can make up to {self.max_actions_all_turns} actions, and each action is separated by '{self.action_separator}'."
         return enhanced_prompt
 
     def initialize_env(self):
@@ -120,10 +122,10 @@ class SokobanAgent:
             
             # Truncate very long content for readability
             content_preview = content
-            # if role.upper() == "ASSISTANT":
-                # if raw_response_count < len(self.raw_response_list):
-                #     print(f"Raw Response: {self.raw_response_list[raw_response_count]}")
-                #     raw_response_count += 1
+            if role.upper() == "ASSISTANT":
+                if raw_response_count < len(self.raw_response_list):
+                    print(f"Raw Response: {self.raw_response_list[raw_response_count]}")
+                    raw_response_count += 1
             print(f"  Content: {repr(content_preview)}")
             print(f"  Length: {len(content)} chars")
             print("-" * 40)
@@ -169,7 +171,7 @@ class SokobanAgent:
             ]
 
         # ✅ DEBUG: Print messages systematically
-        self._debug_print_messages(f"GET_LLM_PROMPTS")
+        # self._debug_print_messages(f"GET_LLM_PROMPTS")
         
         return self.messages
 
@@ -212,12 +214,12 @@ class SokobanAgent:
                 think_content = think_content.replace(special_token, "").strip()
             
             # Parse actions using || separator
-            actions = [action.strip() for action in action_content.split("||") if action.strip()]
+            actions = [action.strip() for action in action_content.split(self.action_separator) if action.strip()]
             
             # Limit actions to max_actions_per_turn
             if len(actions) > self.max_actions_per_turn:
                 actions = actions[:self.max_actions_per_turn]  # Only the first MAX_ACTIONS actions are kept
-                action_content = " || ".join(actions)
+                action_content = self.action_separator.join(actions)
             
             # Reconstruct properly formatted response
             if enable_think:
@@ -225,10 +227,10 @@ class SokobanAgent:
             else:
                 processed_response = f"<answer>{action_content}</answer>"
 
-        print("-" * 80)
-        print(f"processed_response: {processed_response}")
-        print(f"actions: {actions}")
-        print("-" * 80)
+        # print("-" * 80)
+        # print(f"processed_response: {processed_response}")
+        # print(f"actions: {actions}")
+        # print("-" * 80)
         
         return processed_response, actions
 

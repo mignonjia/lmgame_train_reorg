@@ -9,12 +9,13 @@ sokobanAgent:
     max_actions_per_turn: 5
     max_actions_all_turns: 10
     format_penalty: 0.1
+    action_separator: "||"
 
   env_config:
     dim_room: [6, 6]
     num_boxes: 1
     max_steps: 100
-    search_depth: 300
+    search_depth: 100  # Reduced from 300 to make simpler puzzles
     grid_lookup: {0: "#", 1: "_", 2: "O", 3: "√", 4: "X", 5: "P", 6: "S"}
     grid_vocab: {"#": "wall", "_": "empty", "O": "target", "√": "box on target", "X": "box", "P": "player", "S": "player on target"}
     action_lookup: {1: "Up", 2: "Down", 3: "Left", 4: "Right"}

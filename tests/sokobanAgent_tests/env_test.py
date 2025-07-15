@@ -544,6 +544,468 @@ def test_env_config_validation():
     print("   ✅ Environment config validation completed!")
 
 
+def test_random_solver_success_rate():
+    """Test solving Sokoban puzzles with random actions - 100 envs, 10 actions each"""
+    print("\n🎯 TESTING RANDOM SOLVER SUCCESS RATE...")
+    print("   Testing 100 environments with 10 random actions each")
+    
+    env_config = get_default_config()
+    action_lookup = env_config.get('action_lookup', {})
+    available_actions = list(action_lookup.keys())
+    
+    total_envs = 100
+    max_actions = 10
+    successes = 0
+    rewards_collected = []
+    actions_taken = []
+    
+    print(f"   Available actions: {available_actions}")
+    print(f"   Action names: {[action_lookup[a] for a in available_actions]}")
+    
+    for env_id in range(total_envs):
+        env = SokobanEnv(env_config)
+        
+        # Use different seed for each environment
+        seed = random.randint(0, 100000)
+        
+        try:
+            # Reset environment
+            initial_state = env.reset(seed=seed)
+            
+            total_reward = 0
+            actions_used = 0
+            solved = False
+            
+            # Try random actions
+            for step in range(max_actions):
+                action = random.choice(available_actions)
+                state, reward, done, info = env.step(action)
+                
+                total_reward += reward
+                actions_used += 1
+                
+                if info.get('success', False):
+                    solved = True
+                    break
+                
+                if done:
+                    break
+            
+            if solved:
+                successes += 1
+                print(f"   ✅ Env {env_id+1}: SOLVED in {actions_used} actions! Reward: {total_reward}")
+            
+            rewards_collected.append(total_reward)
+            actions_taken.append(actions_used)
+            
+            # Print progress every 25 environments
+            if (env_id + 1) % 25 == 0:
+                current_success_rate = successes / (env_id + 1) * 100
+                avg_reward = sum(rewards_collected) / len(rewards_collected)
+                print(f"   Progress: {env_id+1}/{total_envs} envs, Success rate: {current_success_rate:.1f}%, Avg reward: {avg_reward:.2f}")
+        
+        except Exception as e:
+            print(f"   ❌ Error in env {env_id+1}: {e}")
+        
+        finally:
+            env.close()
+    
+    # Calculate final statistics
+    success_rate = successes / total_envs * 100
+    avg_reward = sum(rewards_collected) / len(rewards_collected) if rewards_collected else 0
+    avg_actions = sum(actions_taken) / len(actions_taken) if actions_taken else 0
+    
+    print(f"\n   📊 RANDOM SOLVER RESULTS:")
+    print(f"      Total environments tested: {total_envs}")
+    print(f"      Max actions per environment: {max_actions}")
+    print(f"      Successes: {successes}")
+    print(f"      Success rate: {success_rate:.2f}%")
+    print(f"      Average reward per environment: {avg_reward:.3f}")
+    print(f"      Average actions taken: {avg_actions:.1f}")
+    
+    if success_rate > 0:
+        print(f"   ✅ Random solver can solve some puzzles!")
+    else:
+        print(f"   ⚠️  Random solver didn't solve any puzzles in {max_actions} actions")
+    
+    return success_rate, avg_reward
+
+
+def test_directional_solver_success_rate():
+    """Test solving with a simple directional heuristic - 100 envs, up to 20 actions"""
+    print("\n🎯 TESTING DIRECTIONAL SOLVER SUCCESS RATE...")
+    print("   Testing 100 environments with directional heuristic (up to 20 actions)")
+    
+    env_config = get_default_config()
+    action_lookup = env_config.get('action_lookup', {})
+    available_actions = list(action_lookup.keys())
+    
+    # Map action names to action IDs for heuristic
+    action_map = {}
+    for action_id, action_name in action_lookup.items():
+        action_map[action_name.lower()] = action_id
+    
+    total_envs = 100
+    max_actions = 20
+    successes = 0
+    rewards_collected = []
+    actions_taken = []
+    
+    def simple_heuristic_action(state, available_actions, action_map):
+        """Simple heuristic: try to move towards boxes or targets"""
+        lines = state.strip().split('\n')
+        
+        # Find player position
+        player_pos = None
+        for r, line in enumerate(lines):
+            for c, char in enumerate(line):
+                if char in ['P', 'S']:  # Player or Player on target
+                    player_pos = (r, c)
+                    break
+            if player_pos:
+                break
+        
+        if not player_pos:
+            return random.choice(available_actions)
+        
+        # Find boxes and targets
+        boxes = []
+        targets = []
+        for r, line in enumerate(lines):
+            for c, char in enumerate(line):
+                if char in ['X']:  # Box not on target
+                    boxes.append((r, c))
+                elif char in ['O', 'S']:  # Target or Player on target
+                    targets.append((r, c))
+        
+        # Simple heuristic: move towards nearest box or target
+        target_pos = None
+        min_dist = float('inf')
+        
+        for box in boxes:
+            dist = abs(box[0] - player_pos[0]) + abs(box[1] - player_pos[1])
+            if dist < min_dist:
+                min_dist = dist
+                target_pos = box
+        
+        for target in targets:
+            dist = abs(target[0] - player_pos[0]) + abs(target[1] - player_pos[1])
+            if dist < min_dist:
+                min_dist = dist
+                target_pos = target
+        
+        if target_pos:
+            # Determine direction to target
+            dr = target_pos[0] - player_pos[0]
+            dc = target_pos[1] - player_pos[1]
+            
+            # Prefer vertical movement first, then horizontal
+            if dr > 0 and 'down' in action_map:
+                return action_map['down']
+            elif dr < 0 and 'up' in action_map:
+                return action_map['up']
+            elif dc > 0 and 'right' in action_map:
+                return action_map['right']
+            elif dc < 0 and 'left' in action_map:
+                return action_map['left']
+        
+        # Fallback to random
+        return random.choice(available_actions)
+    
+    for env_id in range(total_envs):
+        env = SokobanEnv(env_config)
+        
+        # Use different seed for each environment
+        seed = random.randint(0, 100000)
+        
+        try:
+            # Reset environment
+            initial_state = env.reset(seed=seed)
+            current_state = initial_state
+            
+            total_reward = 0
+            actions_used = 0
+            solved = False
+            
+            # Try heuristic actions
+            for step in range(max_actions):
+                action = simple_heuristic_action(current_state, available_actions, action_map)
+                state, reward, done, info = env.step(action)
+                
+                current_state = state
+                total_reward += reward
+                actions_used += 1
+                
+                if info.get('success', False):
+                    solved = True
+                    break
+                
+                if done:
+                    break
+            
+            if solved:
+                successes += 1
+                print(f"   ✅ Env {env_id+1}: SOLVED in {actions_used} actions! Reward: {total_reward}")
+            
+            rewards_collected.append(total_reward)
+            actions_taken.append(actions_used)
+            
+            # Print progress every 25 environments
+            if (env_id + 1) % 25 == 0:
+                current_success_rate = successes / (env_id + 1) * 100
+                avg_reward = sum(rewards_collected) / len(rewards_collected)
+                print(f"   Progress: {env_id+1}/{total_envs} envs, Success rate: {current_success_rate:.1f}%, Avg reward: {avg_reward:.2f}")
+        
+        except Exception as e:
+            print(f"   ❌ Error in env {env_id+1}: {e}")
+        
+        finally:
+            env.close()
+    
+    # Calculate final statistics
+    success_rate = successes / total_envs * 100
+    avg_reward = sum(rewards_collected) / len(rewards_collected) if rewards_collected else 0
+    avg_actions = sum(actions_taken) / len(actions_taken) if actions_taken else 0
+    
+    print(f"\n   📊 DIRECTIONAL SOLVER RESULTS:")
+    print(f"      Total environments tested: {total_envs}")
+    print(f"      Max actions per environment: {max_actions}")
+    print(f"      Successes: {successes}")
+    print(f"      Success rate: {success_rate:.2f}%")
+    print(f"      Average reward per environment: {avg_reward:.3f}")
+    print(f"      Average actions taken: {avg_actions:.1f}")
+    
+    if success_rate > 0:
+        print(f"   ✅ Directional solver can solve puzzles!")
+    else:
+        print(f"   ⚠️  Directional solver didn't solve any puzzles in {max_actions} actions")
+    
+    return success_rate, avg_reward
+
+
+def test_environment_difficulty_analysis():
+    """Analyze the difficulty of generated Sokoban environments"""
+    print("\n🔍 TESTING ENVIRONMENT DIFFICULTY ANALYSIS...")
+    print("   Analyzing 50 environments to understand puzzle characteristics")
+    
+    env_config = get_default_config()
+    
+    total_envs = 50
+    room_analyses = []
+    
+    for env_id in range(total_envs):
+        env = SokobanEnv(env_config)
+        
+        try:
+            # Reset with unique seed
+            seed = random.randint(0, 100000)
+            initial_state = env.reset(seed=seed)
+            
+            # Analyze the room layout
+            lines = initial_state.strip().split('\n')
+            
+            analysis = {
+                'env_id': env_id,
+                'seed': seed,
+                'room_size': (len(lines), len(lines[0]) if lines else 0),
+                'total_cells': len(lines) * len(lines[0]) if lines else 0
+            }
+            
+            # Count different elements using config mapping
+            grid_lookup = env_config['grid_lookup']
+            wall_char = grid_lookup.get(0, '#')
+            empty_char = grid_lookup.get(1, '_')
+            target_char = grid_lookup.get(2, 'O')
+            box_on_target_char = grid_lookup.get(3, '√')
+            box_char = grid_lookup.get(4, 'X')
+            player_char = grid_lookup.get(5, 'P')
+            player_on_target_char = grid_lookup.get(6, 'S')
+            
+            analysis['walls'] = initial_state.count(wall_char)
+            analysis['empty_spaces'] = initial_state.count(empty_char)
+            analysis['targets'] = initial_state.count(target_char)
+            analysis['boxes'] = initial_state.count(box_char)
+            analysis['boxes_on_targets'] = initial_state.count(box_on_target_char)
+            analysis['player_on_target'] = initial_state.count(player_on_target_char)
+            
+            # Calculate metrics
+            analysis['total_boxes'] = analysis['boxes'] + analysis['boxes_on_targets']
+            analysis['total_targets'] = analysis['targets'] + analysis['boxes_on_targets'] + analysis['player_on_target']
+            analysis['free_space_ratio'] = analysis['empty_spaces'] / analysis['total_cells'] if analysis['total_cells'] > 0 else 0
+            analysis['wall_ratio'] = analysis['walls'] / analysis['total_cells'] if analysis['total_cells'] > 0 else 0
+            
+            room_analyses.append(analysis)
+            
+            if env_id % 10 == 0:
+                print(f"   Analyzed {env_id + 1}/{total_envs} environments...")
+        
+        except Exception as e:
+            print(f"   ❌ Error analyzing env {env_id+1}: {e}")
+        
+        finally:
+            env.close()
+    
+    # Calculate statistics
+    if room_analyses:
+        print(f"\n   📊 ENVIRONMENT ANALYSIS RESULTS ({len(room_analyses)} environments):")
+        
+        avg_boxes = sum(a['total_boxes'] for a in room_analyses) / len(room_analyses)
+        avg_targets = sum(a['total_targets'] for a in room_analyses) / len(room_analyses)
+        avg_free_space = sum(a['free_space_ratio'] for a in room_analyses) / len(room_analyses)
+        avg_wall_ratio = sum(a['wall_ratio'] for a in room_analyses) / len(room_analyses)
+        
+        print(f"      Average boxes per environment: {avg_boxes:.1f}")
+        print(f"      Average targets per environment: {avg_targets:.1f}")
+        print(f"      Average free space ratio: {avg_free_space:.2f}")
+        print(f"      Average wall ratio: {avg_wall_ratio:.2f}")
+        
+        # Show some example layouts
+        print(f"\n   📝 SAMPLE ENVIRONMENT LAYOUTS:")
+        for i in range(min(3, len(room_analyses))):
+            analysis = room_analyses[i]
+            print(f"      Environment {analysis['env_id']} (seed {analysis['seed']}):")
+            print(f"         Boxes: {analysis['total_boxes']}, Targets: {analysis['total_targets']}")
+            print(f"         Free space: {analysis['free_space_ratio']:.1%}, Walls: {analysis['wall_ratio']:.1%}")
+    
+    print("   ✅ Environment difficulty analysis completed!")
+
+
+def test_comprehensive_solving_suite():
+    """Run comprehensive solving tests with different strategies and action limits"""
+    print("\n🚀 COMPREHENSIVE SOLVING TEST SUITE")
+    print("=" * 80)
+    
+    results = {}
+    
+    # Test 1: Random solver with 10 actions (as requested)
+    print("\n1️⃣  RANDOM SOLVER - 10 ACTIONS")
+    random_success_10, random_reward_10 = test_random_solver_success_rate()
+    results['random_10'] = {'success_rate': random_success_10, 'avg_reward': random_reward_10}
+    
+    # Test 2: Directional heuristic solver with 20 actions
+    print("\n2️⃣  DIRECTIONAL HEURISTIC SOLVER - 20 ACTIONS")
+    heuristic_success_20, heuristic_reward_20 = test_directional_solver_success_rate()
+    results['heuristic_20'] = {'success_rate': heuristic_success_20, 'avg_reward': heuristic_reward_20}
+    
+    # Test 3: Environment difficulty analysis
+    print("\n3️⃣  ENVIRONMENT DIFFICULTY ANALYSIS")
+    test_environment_difficulty_analysis()
+    
+    # Summary
+    print("\n" + "=" * 80)
+    print("📋 COMPREHENSIVE SOLVING TEST SUMMARY")
+    print("=" * 80)
+    
+    for test_name, test_results in results.items():
+        success_rate = test_results['success_rate']
+        avg_reward = test_results['avg_reward']
+        print(f"   {test_name}: {success_rate:.1f}% success rate, {avg_reward:.3f} avg reward")
+    
+    # Determine best strategy
+    best_strategy = max(results.keys(), key=lambda k: results[k]['success_rate'])
+    best_success_rate = results[best_strategy]['success_rate']
+    
+    print(f"\n   🏆 Best performing strategy: {best_strategy} ({best_success_rate:.1f}% success rate)")
+    
+    if best_success_rate > 0:
+        print(f"   ✅ SUCCESS: Our Sokoban environments can be solved!")
+        print(f"   💡 Recommendation: Use {best_strategy} strategy for solving")
+    else:
+        print(f"   ⚠️  CHALLENGE: No strategy achieved success in limited actions")
+        print(f"   💡 Recommendation: Consider increasing action limits or simpler puzzles")
+    
+    print("   ✅ Comprehensive solving suite completed!")
+    
+    return results
+
+
+def test_simple_action_debug():
+    """Simple debug test to see what happens with individual actions"""
+    print("\n🔧 SIMPLE ACTION DEBUG TEST...")
+    
+    env_config = get_default_config()
+    env = SokobanEnv(env_config)
+    
+    # Reset with a specific seed
+    initial_state = env.reset(seed=42)
+    print(f"   Initial state:")
+    print(f"   {initial_state}")
+    print()
+    
+    # Test each action individually
+    action_lookup = env_config.get('action_lookup', {})
+    available_actions = list(action_lookup.keys())
+    
+    for action in available_actions:
+        # Reset to same state
+        env.reset(seed=42)
+        print(f"   Testing action {action} ({action_lookup[action]}):")
+        
+        try:
+            state, reward, done, info = env.step(action)
+            print(f"      Reward: {reward}")
+            print(f"      Done: {done}")
+            print(f"      Info: {info}")
+            print(f"      New state:")
+            print(f"      {state}")
+            print()
+            
+        except Exception as e:
+            print(f"      ❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
+            print()
+    
+    env.close()
+    print("   ✅ Simple action debug completed!")
+
+
+def test_manual_solve_attempt():
+    """Try to manually solve a simple puzzle to see if success detection works"""
+    print("\n🎯 MANUAL SOLVE ATTEMPT TEST...")
+    
+    env_config = get_default_config()
+    env = SokobanEnv(env_config)
+    
+    # Try several seeds to find a simple puzzle
+    for seed in [42, 100, 200, 300, 400]:
+        try:
+            initial_state = env.reset(seed=seed)
+            print(f"\n   Seed {seed} - Initial state:")
+            print(f"   {initial_state}")
+            
+            # Try a sequence of moves to see if we can solve it
+            action_lookup = env_config.get('action_lookup', {})
+            available_actions = list(action_lookup.keys())
+            
+            # Try random sequence of 20 actions
+            solved = False
+            for step in range(20):
+                action = random.choice(available_actions)
+                state, reward, done, info = env.step(action)
+                
+                if info.get('success', False):
+                    solved = True
+                    print(f"   🎉 SOLVED at seed {seed} in {step+1} steps!")
+                    print(f"   Final state:")
+                    print(f"   {state}")
+                    print(f"   Final reward: {reward}")
+                    break
+                    
+                if step % 5 == 4:  # Print every 5 steps
+                    print(f"   Step {step+1}: action {action} ({action_lookup[action]}), reward {reward}, done {done}")
+            
+            if solved:
+                break
+                
+        except Exception as e:
+            print(f"   ❌ Error with seed {seed}: {e}")
+            continue
+    
+    env.close()
+    print("   ✅ Manual solve attempt completed!")
+
+
 if __name__ == "__main__":
     # Setup logging to test_logs
     tee = setup_logging()
@@ -590,6 +1052,18 @@ if __name__ == "__main__":
 
         print("Test 10: Environment config validation")
         test_env_config_validation()
+        print()
+        
+        print("Test 11: COMPREHENSIVE SOLVING TEST SUITE")
+        test_comprehensive_solving_suite()
+        print()
+        
+        print("Test 12: SIMPLE ACTION DEBUG TEST")
+        test_simple_action_debug()
+        print()
+
+        print("Test 13: MANUAL SOLVE ATTEMPT TEST")
+        test_manual_solve_attempt()
         print()
         
         print("=" * 60)

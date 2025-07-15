@@ -81,7 +81,7 @@ class SyncMultiTurnRollout:
         if self.agent_cls is None:
             raise ValueError("agent_cls is None but trying to create agents")
         
-        print(f"Creating {self.n_agents} agents in {self.agent_group_num} groups of size {self.agent_group_size}")
+        # print(f"Creating {self.n_agents} agents in {self.agent_group_num} groups of size {self.agent_group_size}")
         
         # Verify the math
         if self.n_agents != self.agent_group_num * self.agent_group_size:
@@ -140,9 +140,9 @@ class SyncMultiTurnRollout:
                 prompt_str += "<think>"
             else:
                 prompt_str += "<answer>"
-            print("="*80)
-            print(f"llm prompt text preview: {repr(prompt_str)}")
-            print("="*80)
+            # print("="*80)
+            # print(f"llm prompt text preview: {repr(prompt_str)}")
+            # print("="*80)
             
             # Add answer format prompt based on agent's enable_think setting
             agent = self.agents[idx]

@@ -12,7 +12,7 @@ system:
 # ------ Rollout Configuration ------
 rollout:
   agent_group_num: 2
-  agent_group_size: 4
+  agent_group_size: 1
   train: [sokobanAgent]
   validation: [sokobanAgent]
   truncation: left  # truncate from left (oldest tokens) to keep recent context
