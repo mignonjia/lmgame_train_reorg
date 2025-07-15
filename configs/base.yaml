@@ -11,7 +11,7 @@ system:
 
 # ------ Rollout Configuration ------
 rollout:
-  agent_group_num: 4
+  agent_group_num: 2
   agent_group_size: 4
   train: [sokobanAgent]
   validation: [sokobanAgent]
