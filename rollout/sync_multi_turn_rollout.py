@@ -325,134 +325,24 @@ class SyncMultiTurnRollout:
             env_outputs.append(rollout_state)
         return env_outputs
 
-    def build_ppo_batch(self) -> DataProto:
+    def build_ppo_batch(self, rollout_states: List[Dict]) -> DataProto:
         """
         Build PPO batch from the final batch rollout states.
         Converts collected rollout states to DataProto format for PPO training.
         """
-        # Step 1: Collect final rollout states from all agents
-        env_outputs = self._collect_final_rollout_states()
-        
-        # Step 2: Convert to DataProto format (similar to get_lm_inputs with prepare_for_update=True)
         llm_input_texts = []
         messages_list = []
-        
-        for env_output in env_outputs:
-            # Build messages from trajectory history
-            system_prompt = self.agent_config.get('system_prompt', "You are a helpful AI assistant that solves Sokoban puzzles step by step.")
-            prompt = self.agent_config.get('prompt', "You are solving the Sokoban puzzle.")
+        for rollout_state in rollout_states:
+            agent_id = rollout_state['env_id']
+            agent_tag = rollout_state['tag']
+            if 'state' in rollout_state['hisotory'][-1]:
+                rollout_state['history'] = rollout_state['history'][:-1]
             messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": self.agent_config['system_prompt']}, 
+                {"role": "user", "content": self.prefix_lookup[env_output["env_id"]]}
             ]
-            
-            # Process each turn in the history
-            for idx, content in enumerate(env_output["history"]):
-                messages[-1]["content"] += f"\nTurn {idx + 1}:\n"
-                
-                if "state" in content:
-                    # Use the first agent's enable_think setting (all agents of same type should have same setting)
-                    enable_think = getattr(self.agents[0], 'enable_think', True) if self.agents else True
-                    FORMAT_PROMPT = "<think> [Your thoughts] </think> <answer> [your answer] </answer>" if enable_think else "<answer> [your answer] </answer>"
-                    messages[-1]["content"] += f"State:\n{content['state']}\nYou have {content['actions_left']} actions left. Always output: {FORMAT_PROMPT} with no extra text. Strictly follow this format.\n"
-                
-                if "llm_response" in content:
-                    messages.append({"role": "assistant", "content": content["llm_response"]})
-                
-                if "reward" in content:
-                    messages.append({"role": "user", "content": f"Reward:\n{content['reward']}\n"})
-            
-            # Apply chat template
-            text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=False)
-          
-            llm_input_texts.append(text)
-            messages_list.append(messages)
-        
-        # Tokenize all texts
-        inputs = self.tokenizer(
-            llm_input_texts, 
-            return_tensors="pt", 
-            padding=True, 
-            padding_side="left", 
-            truncation=False
-        )
-        input_ids, attention_mask = inputs.input_ids, inputs.attention_mask
-        
-        # Compute position ids
-        from verl.utils.model import compute_position_id_with_mask
-        position_ids = compute_position_id_with_mask(attention_mask)
-        
-        # Extract scores from trajectory history
-        scores = []
-        for env_output in env_outputs:
-            trajectory_scores = [entry.get('reward', 0.0) for entry in env_output['history']]
-            scores.append(trajectory_scores)
-        
-        # Get masks and scores (assuming this function exists in verl)
-        try:
-            from verl.utils.reward_score import get_masks_and_scores
-            score_tensor, loss_mask, response_mask = get_masks_and_scores(
-                input_ids, 
-                self.tokenizer, 
-                scores, 
-                use_turn_scores=getattr(self.cfg.rollout, 'use_turn_scores', False),
-                enable_response_mask=getattr(self.cfg.rollout, 'enable_response_mask', True)
-            )
-        except ImportError:
-            # Fallback if function not available
-            score_tensor = torch.zeros_like(input_ids[:, 1:], dtype=torch.float)
-            loss_mask = torch.ones_like(input_ids[:, 1:], dtype=torch.float)
-            response_mask = torch.ones_like(input_ids[:, 1:], dtype=torch.float)
-        
-        # Build DataProto with proper TensorDict
-        llm_inputs = DataProto()
-        
-        # Ensure all tensors are on the same device and have correct shapes
-        device = input_ids.device
-        batch_size = input_ids.shape[0]
-        
-        # Create TensorDict with proper batch_size parameter
-        final_responses = input_ids[:, 1:]  # remove the first token
-        llm_inputs.batch = TensorDict({
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "position_ids": position_ids,
-            "responses": final_responses,
-            "loss_mask": loss_mask,
-            "rm_scores": score_tensor,
-            "original_rm_scores": score_tensor,
-        }, batch_size=batch_size, device=device)
-        
-        # Non-tensor batch data
-        llm_inputs.non_tensor_batch = {
-            "env_ids": np.array([env_output["env_id"] for env_output in env_outputs], dtype=object),
-            "group_ids": np.array([env_output["group_id"] for env_output in env_outputs], dtype=object),
-            "messages_list": np.array(messages_list, dtype=object),
-        }
-        
-        # Collect metrics
-        metrics = {}
-        for env_output in env_outputs:
-            for key, value in env_output["metrics"].items():
-                if key not in metrics:
-                    metrics[key] = []
-                metrics[key].append(value)
-        
-        # Calculate mean metrics
-        mean_metrics = {}
-        for key, values in metrics.items():
-            if isinstance(values, list):
-                mean_metrics[key] = np.mean(values)
-            else:
-                mean_metrics[key] = values
-        
-        # Add response length metric
-        if response_mask is not None:
-            mean_metrics["response_length"] = response_mask.sum(dim=-1).float().mean().item()
-        
-        llm_inputs.meta_info = {"metrics": mean_metrics}
-        
-        return llm_inputs
+
+       
 
     # ─────────────────── LIFECYCLE MANAGEMENT ───────────────────
 

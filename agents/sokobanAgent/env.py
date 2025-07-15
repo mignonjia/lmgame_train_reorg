@@ -12,7 +12,7 @@ class SokobanEnv(GymSokobanEnv):
         self.search_depth = self.config.get('search_depth', 300)
         self.ACTION_SPACE = gym.spaces.discrete.Discrete(4, start=1)  # Our config uses actions 1-4
         self.render_mode = self.config.get('render_mode', 'text')
-
+        
         GymSokobanEnv.__init__(
             self,
             dim_room=self.config.get('dim_room', (6, 6)), 

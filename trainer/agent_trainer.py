@@ -243,11 +243,11 @@ class AgentTrainer(RayPPOTrainer):
         assert self.multi_turn_rollout is not None, "multi_turn_rollout should be initialized"
         
         # Run multi-turn rollout to get complete trajectories
-        final_env_outs = self.multi_turn_rollout.rollout()
+        final_rollout_states = self.multi_turn_rollout.rollout()
         
         # Build update batch containing full trajectories and rewards
         # This already returns a complete DataProto with all necessary fields
-        rollout_batch = self.multi_turn_rollout.build_ppo_batch()
+        rollout_batch = self.multi_turn_rollout.build_ppo_batch(final_rollout_states)
         
         # Apply rollout filtering if enabled
         rollout_filter_ratio = getattr(self.config.rollout, 'rollout_filter_ratio', 1.0)
@@ -516,8 +516,8 @@ class AgentTrainer(RayPPOTrainer):
                 # training metrics
                 metrics.update(
                     {
-                        "training/global_step": self.global_steps,
-                        "training/epoch": epoch,
+                        "train/global_step": self.global_steps,
+                        "train/epoch": epoch,
                     }
                 )
                 # collect metrics

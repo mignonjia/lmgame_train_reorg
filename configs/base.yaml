@@ -11,8 +11,8 @@ system:
 
 # ------ Rollout Configuration ------
 rollout:
-  agent_group_num: 2
-  agent_group_size: 1
+  agent_group_num: 8
+  agent_group_size: 16
   train: [sokobanAgent]
   validation: [sokobanAgent]
   truncation: left  # truncate from left (oldest tokens) to keep recent context
@@ -30,6 +30,7 @@ total_training_steps: 200
 n_gpus_per_node: 1
 max_prompt_length: 4096
 max_response_length: 400
+test_freq: 5
 model_path: Qwen/Qwen2.5-0.5B-Instruct
 project_name: lmgame
 experiment_name: sokoban_train_example
@@ -100,7 +101,7 @@ trainer:
   validation_steps: 1 # validation instances = validation_steps * val_env_groups * group_size
   val_before_train: True
   n_gpus_per_node: ${n_gpus_per_node}
-  test_freq: 10
+  test_freq: ${test_freq}
   generations_to_log_to_wandb: 
     train: 128 # TODO: will be implemented
     val: 20
