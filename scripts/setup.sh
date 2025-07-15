@@ -125,7 +125,7 @@ install_torch() {
     # Check for CUDA support
     if command_exists nvidia-smi; then
         print_step "CUDA GPU detected, installing torch with CUDA support..."
-        pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cu121
+        pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cu128
     else
         print_step "No CUDA GPU detected, installing CPU-only torch..."
         pip install torch==2.7.0
@@ -223,6 +223,68 @@ verify_installation() {
     fi
 }
 
+# Check and setup authentication
+setup_authentication() {
+    print_step "Setting up authentication..."
+    
+    # Check for huggingface-cli
+    if ! command -v huggingface-cli &> /dev/null; then
+        print_warning "huggingface-cli not found. Installing..."
+        pip install huggingface_hub[cli]
+    fi
+    
+    # Check for wandb
+    if ! command -v wandb &> /dev/null; then
+        print_warning "wandb not found. Installing..."
+        pip install wandb
+    fi
+    
+    # Hugging Face login
+    print_step "Checking Hugging Face authentication..."
+    if [ -n "$HF_TOKEN" ]; then
+        print_success "HF_TOKEN found in environment"
+        print_step "Logging into Hugging Face..."
+        if huggingface-cli login --token "$HF_TOKEN" >/dev/null 2>&1; then
+            print_success "Hugging Face login successful"
+        else
+            print_warning "Hugging Face login failed, but continuing..."
+        fi
+    else
+        print_warning "HF_TOKEN not found in environment"
+        echo "   To set HF_TOKEN: export HF_TOKEN=your_hf_token"
+    fi
+    
+    # Weights & Biases login
+    print_step "Checking Weights & Biases authentication..."
+    if [ -n "$WANDB_API_KEY" ]; then
+        print_success "WANDB_API_KEY found in environment"
+        print_step "Logging into Weights & Biases..."
+        if wandb login --relogin "$WANDB_API_KEY" >/dev/null 2>&1; then
+            print_success "Weights & Biases login successful"
+        else
+            print_warning "Weights & Biases login failed, but continuing..."
+        fi
+    else
+        print_warning "WANDB_API_KEY not found in environment"
+        echo "   To set WANDB_API_KEY: export WANDB_API_KEY=your_wandb_key"
+    fi
+    
+    # Set WANDB team/organization
+    if [ -n "$WANDB_ENTITY" ]; then
+        print_success "WANDB_ENTITY found: $WANDB_ENTITY"
+    else
+        print_warning "WANDB_ENTITY not found in environment"
+        echo "   To set WANDB_ENTITY: export WANDB_ENTITY=your_wandb_org_name"
+    fi
+    
+    echo ""
+    echo "💡 For better security, consider setting environment variables:"
+    echo "   export HF_TOKEN=your_hf_token"
+    echo "   export WANDB_API_KEY=your_wandb_key"
+    echo "   export WANDB_ENTITY=your_wandb_org_name"
+    echo ""
+}
+
 # Main installation function
 main() {
     echo "=========================================="
@@ -238,6 +300,7 @@ main() {
     install_requirements
     install_package
     verify_installation
+    setup_authentication
     
     echo "=========================================="
     echo -e "${GREEN}Setup completed successfully!${NC}"
