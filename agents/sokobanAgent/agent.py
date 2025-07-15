@@ -1,5 +1,5 @@
-#TODO: Align with reported performance in the sokoban rl training
-#TODO: be careful with the parse_response logic, which may be associated with format penality.
+# TODO: Please handle ad hoc fix for the messages format in the get_llm_prompts function. (Maybe better way)
+# TODO: Abstract agent class
 # ─────────────────── IMPORTS ───────────────────
 import random
 import yaml
@@ -87,7 +87,6 @@ class SokobanAgent:
             action_lookup_str = "\nYour available actions are:\n" + ", ".join(actions)
             enhanced_prompt += action_lookup_str
 
-        # enhanced_prompt += f"\n\nGame Rules:\n- You have {self.max_turns} turns to solve this puzzle\n- Each turn you can make up to {self.max_actions_per_turn} actions\n- Total actions allowed across all turns: {self.max_actions_all_turns}\n- Separate multiple actions with ' || ' (e.g., 'Up || Right || Down')"
         enhanced_prompt += f"\nYou can make up to {self.max_actions_all_turns} actions, and each action is separated by '{self.action_separator}'."
         return enhanced_prompt
 
@@ -102,7 +101,7 @@ class SokobanAgent:
         print(f"{'='*80}")
         
         if not hasattr(self, 'messages') or not self.messages:
-            print("❌ ERROR: No messages found!")
+            print("ERROR: No messages found!")
             return
         
         print(f"Total messages: {len(self.messages)}")
@@ -139,13 +138,12 @@ class SokobanAgent:
     def get_llm_prompts(self, env_out):
         """Convert environment outputs to LLM prompts following SyncMultiTurnRollout interface."""
         
-        # ✅ DEFENSIVE CHECK: Ensure messages are initialized
+        # Ensure messages are initialized
         if not hasattr(self, 'messages') or not self.messages:
             self.messages = [
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": self.prompt}
             ]
-    
         
         # Calculate actions remaining based on max_actions_all_turns
         actions_remaining = max(0, self.max_actions_all_turns - self.total_actions_consumed)
@@ -170,9 +168,6 @@ class SokobanAgent:
                 {"role": "user", "content": "Please respond appropriately."}
             ]
 
-        # ✅ DEBUG: Print messages systematically
-        # self._debug_print_messages(f"GET_LLM_PROMPTS")
-
         # Ad hoc fix for the messages format - merge Message 2 and Message 3 if both are USER - for future loss mask computation
         if len(self.messages) >= 3 and self.messages[1]["role"] == "user" and self.messages[2]["role"] == "user":
             # Merge Message 2 and Message 3 content
@@ -180,10 +175,6 @@ class SokobanAgent:
             self.messages[1]["content"] = merged_content
             # Remove Message 3
             self.messages.pop(2)
-
-        # print(f"="*80)
-        # print(f"Reformatted messages: {repr(self.messages)}")
-        # print(f"="*80)
         
         return self.messages
 
@@ -238,11 +229,6 @@ class SokobanAgent:
                 processed_response = f"<think>{think_content}</think><answer>{action_content}</answer>"
             else:
                 processed_response = f"<answer>{action_content}</answer>"
-
-        # print("-" * 80)
-        # print(f"processed_response: {processed_response}")
-        # print(f"actions: {actions}")
-        # print("-" * 80)
         
         return processed_response, actions
 
@@ -250,10 +236,9 @@ class SokobanAgent:
         """Process LLM outputs and get environment outputs."""
         llm_raw_response = llm_response
 
-        # store raw response for debugging
+        # Store raw response for debugging
         self.raw_response_list.append(llm_raw_response)
         
-       
         self.cur_turn += 1
 
         processed_llm_response, actions = self.parse_model_response(llm_raw_response, enable_think=self.enable_think)
@@ -280,7 +265,7 @@ class SokobanAgent:
                 # First try exact match
                 if action_str_clean in action_lookup_reverse:
                     action = action_lookup_reverse[action_str_clean]
-                    # ✅ FAULT TOLERANCE: Validate action is in expected range
+                    # Validate action is in expected range
                     if action in self.env_config['action_lookup']:
                         valid_actions.append(action)
                     else:
@@ -288,7 +273,7 @@ class SokobanAgent:
                 # Then try case-insensitive match
                 elif action_str_clean.lower() in action_lookup_reverse_lower:
                     action = action_lookup_reverse_lower[action_str_clean.lower()]
-                    # ✅ FAULT TOLERANCE: Validate action is in expected range
+                    # Validate action is in expected range
                     if action in self.env_config['action_lookup']:
                         valid_actions.append(action)
                     else:
@@ -296,7 +281,7 @@ class SokobanAgent:
                 else:
                     # Try parsing as integer
                     action = int(action_str_clean)
-                    # ✅ FAULT TOLERANCE: Validate numeric action is in expected range  
+                    # Validate numeric action is in expected range  
                     if action in self.env_config['action_lookup']:
                         valid_actions.append(action)
                     else:
@@ -319,7 +304,7 @@ class SokobanAgent:
                 if done:
                     break
             except Exception as e:
-                # ✅ FAULT TOLERANCE: Handle any environment step errors
+                # Handle any environment step errors
                 print(f"Warning: Agent {self.agent_id} step failed for action {action}: {e}")
                 # Continue with next action instead of crashing
                 continue
@@ -425,7 +410,7 @@ class SokobanAgent:
     # ─────────────────── LIFECYCLE MANAGEMENT ───────────────────
     def reset(self, seed=None):
         """Reset agent state for new episode and return initial environment outputs."""
-        # ✅ FIX: Implement group-based seeding following reference implementation
+        # Implement group-based seeding following reference implementation
         # Agents within the same group should have the same environment (same seed)
         # Different groups should have different environments (different seeds)
         if seed is None:

@@ -1,4 +1,7 @@
 # agent_trainer.py
+# TODO: 1. add a hyperparameter for validation agent number
+# TODO: 2. debug _validate() compared to mingjia's clear version of ragen
+# TODO: 3. log extra metric or llm generation to wandb in validation or training 
 from typing import Dict, Any
 import torch
 import numpy as np
@@ -123,6 +126,7 @@ class AgentTrainer(RayPPOTrainer):
         )
 
 
+    # ─────────────────── MODIFICATION: Multi-turn rollout generation replaces single-turn generation ───────────────────
     def _generate_multi_turn_sequences(self, gen_batch: DataProto) -> tuple[DataProto, dict]:
         """
         Replace single-turn generation with multi-turn rollout logic.
@@ -143,8 +147,8 @@ class AgentTrainer(RayPPOTrainer):
         # Run multi-turn rollout to get complete trajectories
         self.multi_turn_rollout.rollout()
         
-        final_rollout_states = self.multi_turn_rollout._collect_final_rollout_states()
         # Build update batch containing full trajectories and rewards
+        final_rollout_states = self.multi_turn_rollout._collect_final_rollout_states()
         # This already returns a complete DataProto with all necessary fields
         rollout_batch = self.multi_turn_rollout.build_ppo_batch(final_rollout_states)
         
@@ -154,6 +158,7 @@ class AgentTrainer(RayPPOTrainer):
         
         # Return the complete DataProto and metrics as tuple consistently
         return rollout_batch, filter_metrics
+    # ─────────────────── END MODIFICATION ───────────────────
 
     def fit(self):
         """
@@ -222,7 +227,7 @@ class AgentTrainer(RayPPOTrainer):
                 is_last_step = self.global_steps >= self.total_training_steps
 
                 with marked_timer("step", timing_raw):
-                    # ─────────────────── MULTI-TURN ROLLOUT GENERATION ───────────────────
+                    # ─────────────────── MODIFICATION: Multi-turn rollout generation replaces actor_rollout_wg.generate_sequences ───────────────────
                     # generate a batch using multi-turn rollout
                     with marked_timer("gen", timing_raw, color="red"):
                         # Use multi-turn rollout instead of single-turn generation
@@ -237,28 +242,14 @@ class AgentTrainer(RayPPOTrainer):
                             timing_raw.update(batch.meta_info["timing"])
                             batch.meta_info.pop("timing", None)
                     
-
-
-                    # if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
-                    #     with marked_timer("gen_max", timing_raw, color="purple"):
-                    #         gen_baseline_batch = deepcopy(gen_batch)
-                    #         gen_baseline_batch.meta_info["do_sample"] = False
-                    #         gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
-
-                    #         batch = batch.union(gen_baseline_output)
-                    #         reward_baseline_tensor = self.reward_fn(batch)
-                    #         reward_baseline_tensor = reward_baseline_tensor.sum(dim=-1)
-
-                    #         batch.pop(batch_keys=list(gen_baseline_output.batch.keys()))
-
-                    #         batch.batch["reward_baselines"] = reward_baseline_tensor
-
-                    #         del gen_baseline_batch, gen_baseline_output
+                    
 
                     # Add UIDs after batch is populated with actual data
                     batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object)
 
                     batch.batch["response_mask"] = batch.batch["loss_mask"]
+
+                    # ─────────────────── END MODIFICATION ───────────────────
 
                     # Balance the number of valid tokens across DP ranks.
                     # NOTE: This usually changes the order of data in the `batch`,
@@ -442,6 +433,7 @@ class AgentTrainer(RayPPOTrainer):
                     progress_bar.close()
                     return
 
+    # ─────────────────── MODIFICATION: Multi-turn rollout validation replaces val_dataloader validation ───────────────────
     def _validate(self):
         """
         Validation method for AgentTrainer using multi-turn rollouts.
@@ -458,15 +450,13 @@ class AgentTrainer(RayPPOTrainer):
         sample_outputs = []
         sample_scores = []
 
-        # ─────────────────── MODIFICATION: Use rollout-based validation config ───────────────────
+        # MODIFICATION: Use rollout-based validation config instead of val_dataloader
         env_metric_dict = {}
         for step in range(self.config.trainer.validation_steps):
-            # ✅ MODIFICATION: Use agent_group_num * agent_group_size for total validation agents
+            # MODIFICATION: Use agent_group_num * agent_group_size for total validation agents
             agent_group_num = self.config.rollout.agent_group_num
             agent_group_size = self.config.rollout.agent_group_size
             total_validation_agents = agent_group_num * agent_group_size
-            
-
             
             input_texts = ["" for _ in range(total_validation_agents)]
             sample_inputs.extend(input_texts)
@@ -480,7 +470,7 @@ class AgentTrainer(RayPPOTrainer):
             }
             test_gen_batch = DataProto(batch=None, non_tensor_batch=None, meta_info=meta_info)
 
-            # ─────────────────── MODIFICATION: Use multi-turn rollout with rollout() + build_ppo_batch() ───────────────────
+            # MODIFICATION: Use multi-turn rollout with rollout() + build_ppo_batch()
             start_time = time.time()
             
             # Initialize multi-turn rollout if not already done
@@ -490,14 +480,14 @@ class AgentTrainer(RayPPOTrainer):
             # Type narrowing assertion - we know it's not None after initialization  
             assert self.multi_turn_rollout is not None, "multi_turn_rollout should be initialized"
             
-            # ✅ MODIFICATION: Call rollout() first, then build_ppo_batch() 
+            # MODIFICATION: Call rollout() first, then build_ppo_batch() 
             self.multi_turn_rollout.rollout()
             rollout_states = self.multi_turn_rollout._collect_final_rollout_states()
             test_batch = self.multi_turn_rollout.build_ppo_batch(rollout_states)
             
             end_time = time.time()
             
-            # ✅ MODIFICATION: Use "val-env/" prefix for environment metrics
+            # MODIFICATION: Use "val-env/" prefix for environment metrics
             for key, value in test_batch.meta_info["metrics"].items():
                 if "val-env/" + key not in env_metric_dict:
                     env_metric_dict["val-env/" + key] = []
@@ -508,23 +498,22 @@ class AgentTrainer(RayPPOTrainer):
             output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
             sample_outputs.extend(output_texts)
 
-            # ─────────────────── ORIGINAL: Evaluate using reward function ───────────────────
-            # evaluate using reward_function
+            # ORIGINAL: Evaluate using reward function
             reward_tensor = self.val_reward_fn(test_batch)
             
-            # ✅ MODIFICATION: Store scores and collect for final processing
+            # MODIFICATION: Store scores and collect for final processing
             scores = reward_tensor.sum(-1).cpu().tolist()
             sample_scores.extend(scores)
 
             reward_tensor_lst.append(reward_tensor)
             data_source_lst.append(test_batch.non_tensor_batch.get("data_source", ["unknown"] * reward_tensor.shape[0]))
 
-        # ✅ MODIFICATION: Process tensor list and data sources like the example
+        # MODIFICATION: Process tensor list and data sources like the example
         reward_tensor_lst = [i.sum(-1).cpu() for i in reward_tensor_lst]
         reward_tensor = torch.cat(reward_tensor_lst)  # (batch_size,)
         data_sources = np.concatenate(data_source_lst, axis=0)
 
-        # ✅ MODIFICATION: Evaluate test_score based on data source like the example
+        # MODIFICATION: Evaluate test_score based on data source like the example
         data_source_reward = {}
         for i in range(reward_tensor.shape[0]):
             data_source = data_sources[i]
@@ -532,7 +521,7 @@ class AgentTrainer(RayPPOTrainer):
                 data_source_reward[data_source] = []
             data_source_reward[data_source].append(reward_tensor[i].item())
 
-        # ✅ MODIFICATION: Simple metric processing with fallback
+        # MODIFICATION: Simple metric processing with fallback
         try:
             from verl.utils.metric import reduce_metrics
         except ImportError:
@@ -542,8 +531,9 @@ class AgentTrainer(RayPPOTrainer):
 
         metric_dict = reduce_metrics(env_metric_dict)
         
-        # ✅ MODIFICATION: Add test scores per data source like the example
+        # MODIFICATION: Add test scores per data source like the example
         for data_source, rewards in data_source_reward.items():
             metric_dict[f'val-env/test_score/{data_source}'] = np.mean(rewards)
 
         return metric_dict
+    # ─────────────────── END MODIFICATION ───────────────────

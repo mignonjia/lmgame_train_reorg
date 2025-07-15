@@ -1,4 +1,7 @@
 # sync_multi_turn_rollout.py
+# TODO: 1. Debug early stop logic in the multi-turn rollout (Be careful with the done_mask and llm_input_texts in build_ppo_batch)
+# TODO: 2. Reward Computation like loss_mask, reward_mask, etc. Maybe there is a better way to do this.(research mechansim)
+# TODO: 3. Optimize function calls like self.tokenizer.encode(). We can replace it with verl_F.tokenize_and_postprocess_data(verl implemented functions)
 from typing import List, Dict, Any, Union
 import torch
 from verl import DataProto
@@ -34,18 +37,15 @@ class SyncMultiTurnRollout:
         self.processor = processor
         self.actor_wg = actor_rollout_wg
         
-        # ✅ MODIFICATION: Calculate total agents from agent_group_num * agent_group_size
+        # Calculate total agents from agent_group_num * agent_group_size
         agent_group_num = getattr(cfg.rollout, "agent_group_num", 1)
         agent_group_size = getattr(cfg.rollout, "agent_group_size", 1)
         self.n_agents = agent_group_num * agent_group_size
         self.agent_group_num = agent_group_num
         self.agent_group_size = agent_group_size
         
-
-        
         # Initialize agent configuration from config
         self._setup_agent_config()
-
         self._init_batch_agents()
         
         # Global turn counter
@@ -80,8 +80,6 @@ class SyncMultiTurnRollout:
         # Create agents of the same type
         if self.agent_cls is None:
             raise ValueError("agent_cls is None but trying to create agents")
-        
-        # print(f"Creating {self.n_agents} agents in {self.agent_group_num} groups of size {self.agent_group_size}")
         
         # Verify the math
         if self.n_agents != self.agent_group_num * self.agent_group_size:
@@ -140,10 +138,8 @@ class SyncMultiTurnRollout:
                 prompt_str += "<think>"
             else:
                 prompt_str += "<answer>"
-            
-            # Add answer format prompt based on agent's enable_think setting
-            agent = self.agents[idx]
         
+
             
             llm_input_texts.append(prompt_str)
         
@@ -165,7 +161,6 @@ class SyncMultiTurnRollout:
                     left_pad=True,  # Left pad for batch generation
                     truncation=self.cfg.rollout.truncation
                 )
-                
                 
                 # Check for all-padding sequences
                 pad_token_id = self.tokenizer.pad_token_id
@@ -302,7 +297,7 @@ class SyncMultiTurnRollout:
             # Process LLM outputs and update environment outputs
             self.env_outs = self.get_batch_env_outputs(lm_outputs)
 
-            #TODO: Early stopping. If max_actions_all_turns is reached or env is done, break.
+            # TODO: Early stopping. If max_actions_all_turns is reached or env is done, break.
             
             self.step_cnt += 1
         
@@ -314,9 +309,16 @@ class SyncMultiTurnRollout:
 
     def get_masks_and_scores(self, input_ids: torch.Tensor, all_scores: List[List[float]] | None = None, use_turn_scores: bool = False):
         """
-        input_ids: shape (bsz, seq_len)
         Get loss mask that only learns between <|im_start|>assistant and <|im_end|>. Currently only supports qwen.
-        NOTE: important! This assumes that the input_ids starts with system and then user & assistant in alternative ways
+        NOTE: This assumes that the input_ids starts with system and then user & assistant in alternative ways
+        
+        Args:
+            input_ids: shape (bsz, seq_len)
+            all_scores: List of score lists for each agent
+            use_turn_scores: Whether to use turn-based scores
+            
+        Returns:
+            Tuple of (loss_mask, score_tensor, response_mask)
         """
         special_token = self.tokenizer.encode("<|im_start|>")[0]
         turn_starts = torch.where(input_ids == special_token, 1, 0)
@@ -359,7 +361,6 @@ class SyncMultiTurnRollout:
         else:
             raise ValueError(f"Invalid grouping: {grouping}")
 
-
         if method == "mean_std":
             norm_func = lambda x: (x - x.mean(dim=-1, keepdim=True)) / (x.std(dim=-1, keepdim=True) + 1e-6) if x.std(dim=-1, keepdim=True).abs().max() > 1e-6 else torch.zeros_like(x) # stable to bf16 than x.std()
         elif method == "mean":
@@ -371,7 +372,7 @@ class SyncMultiTurnRollout:
         else:
             raise ValueError(f"Invalid normalization method: {method}")
 
-        # apply groupwise normalization
+        # Apply groupwise normalization
         group2index = {}
         for i, env_tag in enumerate(group_tags):
             if env_tag not in group2index:
@@ -379,13 +380,12 @@ class SyncMultiTurnRollout:
             group2index[env_tag].append(i)
         group2index = {k: torch.tensor(v) for k, v in group2index.items()}
 
-        
         acc_scores = score_tensor[:, -1]
         normalized_acc_scores = acc_scores.clone()
         for group, index in group2index.items():
             normalized_acc_scores[index] = norm_func(normalized_acc_scores[index])
 
-        # apply penalty
+        # Apply penalty
         penalty = torch.tensor([env_output["penalty"] for env_output in env_outputs], dtype=torch.float32)
         normalized_acc_scores = normalized_acc_scores + penalty
 
@@ -403,7 +403,6 @@ class SyncMultiTurnRollout:
         rm_scores = rollout_batch.batch["rm_scores"].sum(dim=-1).view(num_groups, group_size)
         
         selected_groups = int(rollout_filter_ratio * num_groups)
-
 
         in_group_std = rm_scores.std(dim=-1)
         in_group_max = rm_scores.max(dim=-1).values
@@ -424,7 +423,6 @@ class SyncMultiTurnRollout:
 
         rollout_batch.batch = rollout_batch.batch[mask]
         
-
         for key, value in rollout_batch.non_tensor_batch.items():
             if isinstance(value, np.ndarray):
                 rollout_batch.non_tensor_batch[key] = value[mask]
@@ -441,7 +439,6 @@ class SyncMultiTurnRollout:
         }
         return rollout_batch, metrics
 
-
     def _collect_final_rollout_states(self) -> List[Dict]:
         """
         Collect final rollout states from all agents.
@@ -456,8 +453,6 @@ class SyncMultiTurnRollout:
             env_outputs.append(rollout_state)
         return env_outputs
 
-
-
     def build_ppo_batch(self, rollout_states: List[Dict]) -> DataProto:
         """
         Build PPO batch from the final batch rollout states.
@@ -465,11 +460,11 @@ class SyncMultiTurnRollout:
         """
         llm_input_texts = []
         messages_list = []
+        
         # Loop through all agents to collect their LLM prompts
         for idx, agent in enumerate(self.agents):
             # Get the current environment output for this agent
             env_out = self.env_outs[idx] if self.env_outs else None
-
             
             if env_out is None:
                 # Handle case where env_outs is not initialized
@@ -495,20 +490,11 @@ class SyncMultiTurnRollout:
                 # Fallback in case of chat template error
                 prompt_text = "System error in chat template"
             
-            # Append the text to llm_input_texts
             llm_input_texts.append(prompt_text)
         
-        # when prepare for update, we do not add the state from the n+1 turn
+        # When prepare for update, we do not add the state from the n+1 turn
         if 'state' in rollout_states[-1]['history'][-1]:
             rollout_states[-1]['history'] = rollout_states[-1]['history'][:-1]
-
-        print("="*80)
-        print(f"DEBUG: llm_input_texts and messages_list")
-        for i in range(len(llm_input_texts)):
-            print(f"DEBUG: llm_input_texts[{i}]: {repr(llm_input_texts[i])}")
-        for j in range(len(messages_list)):
-            print(f"DEBUG: messages_list[{j}]: {repr(messages_list[j])}")
-        print("="*80)
         
         inputs = self.tokenizer(llm_input_texts, return_tensors="pt", padding=True, padding_side="left", truncation=False) # do not truncate here. Process later at TODO
         input_ids, attention_mask = inputs.input_ids, inputs.attention_mask
@@ -549,9 +535,6 @@ class SyncMultiTurnRollout:
 
         return llm_inputs
 
-
-       
-
     # ─────────────────── LIFECYCLE MANAGEMENT ───────────────────
 
     def _reset_batch_agents(self, seed=None):
@@ -584,8 +567,6 @@ class SyncMultiTurnRollout:
             # All agents in the same group use the same seed (same environment)
             group_seed = group_seeds[group_id]
             
-         
-            
             # Reset agent with group-specific seed
             initial_env_out = agent.reset(seed=group_seed)
             initial_env_outs.append(initial_env_out)
@@ -594,7 +575,6 @@ class SyncMultiTurnRollout:
         self.done_mask = torch.zeros(self.n_agents, dtype=torch.bool)
         self.env_outs = initial_env_outs
         self.step_cnt = 0
-
         
     def reset(self, seed=None):
         """
@@ -608,7 +588,7 @@ class SyncMultiTurnRollout:
 
     def close(self):
         """
-        agent.close() and/or env.close() for tidy teardown.
+        Clean up agents and environments for tidy teardown.
         """
         for idx in range(self.n_agents):
             agent = self.agents[idx]

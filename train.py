@@ -22,11 +22,13 @@ import hydra
 import ray
 from omegaconf import OmegaConf
 
+# ─────────────────── MODIFICATION: Import AgentTrainer instead of RayPPOTrainer ───────────────────
 from trainer.agent_trainer import AgentTrainer
+# ─────────────────── END MODIFICATION ───────────────────
 from verl.trainer.ppo.reward import load_reward_manager
 
 
-# ------ DummyRewardManager Class ------
+# ─────────────────── MODIFICATION: DummyRewardManager replaces load_reward_manager ───────────────────
 class DummyRewardManager():
     """The reward manager."""
     
@@ -95,9 +97,7 @@ class DummyRewardManager():
             }
         else:
             return reward_tensor
-
-
-# ------ Config Dependency Function ------
+# ─────────────────── END MODIFICATION ───────────────────
 
 
 @hydra.main(config_path="configs", config_name="ppo_trainer", version_base=None)
@@ -231,19 +231,21 @@ class TaskRunner:
             role_worker_mapping[Role.RefPolicy] = ray.remote(ActorRolloutRefWorker)
             mapping[Role.RefPolicy] = global_pool_id
 
-        # Use DummyRewardManager instead of load_reward_manager
+        # ─────────────────── MODIFICATION: Use DummyRewardManager instead of load_reward_manager ───────────────────
         reward_fn = DummyRewardManager(tokenizer=tokenizer, num_examine=0, compute_score=None)
         val_reward_fn = DummyRewardManager(tokenizer=tokenizer, num_examine=1, compute_score=None)
+        # ─────────────────── END MODIFICATION ───────────────────
         resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
 
         from verl.utils.dataset.rl_dataset import collate_fn
 
-        # Remove dataset preparation - using empty/dummy datasets
+        # ─────────────────── MODIFICATION: Remove dataset preparation - using None instead of create_rl_dataset ───────────────────
         train_dataset = None
         val_dataset = None
         train_sampler = None
+        # ─────────────────── END MODIFICATION ───────────────────
 
-        # Initialize the Agent trainer.
+        # ─────────────────── MODIFICATION: Initialize AgentTrainer instead of RayPPOTrainer ───────────────────
         trainer = AgentTrainer(
             config=config,
             tokenizer=tokenizer,
@@ -259,15 +261,17 @@ class TaskRunner:
             train_sampler=None,  # Changed from train_sampler
             device_name=config.trainer.device,
         )
+        # ─────────────────── END MODIFICATION ───────────────────
         # Initialize the workers of the trainer.
         trainer.init_workers()
         # Start the training process.
         trainer.fit()
 
 
-# Dataset creation functions removed - using dummy datasets instead
+# ─────────────────── MODIFICATION: Remove dataset creation functions - using None datasets instead ───────────────────
 # def create_rl_dataset(...) - REMOVED
 # def create_rl_sampler(...) - REMOVED
+# ─────────────────── END MODIFICATION ───────────────────
 
 
 if __name__ == "__main__":

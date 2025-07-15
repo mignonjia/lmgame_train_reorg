@@ -20,6 +20,3 @@ sokobanAgent:
     grid_vocab: {"#": "wall", "_": "empty", "O": "target", "√": "box on target", "X": "box", "P": "player", "S": "player on target"}
     action_lookup: {1: "Up", 2: "Down", 3: "Left", 4: "Right"}
     render_mode: "text"
-
-
-#...

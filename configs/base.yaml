@@ -1,6 +1,6 @@
 # Base configuration for PPO training with Sokoban agents
 # This configuration follows the hydra structure with defaults and overrides
-# ------ Custom Training Config------
+# ------ Hydra Config ------
 
 defaults:
   - agents
@@ -12,12 +12,11 @@ system:
 # ------ Rollout Configuration ------
 rollout:
   agent_group_num: 8
-  agent_group_size: 16
+  agent_group_size: 16 # number of agents = agent_group_num * agent_group_size
   train: [sokobanAgent]
   validation: [sokobanAgent]
   truncation: left  # truncate from left (oldest tokens) to keep recent context
   use_turn_scores: False  # for GAE computation
-  enable_response_mask: True  # for stability
   rollout_filter_ratio: 0.25  # filter ratio for rollout selection
   rollout_filter_type: std  # std or std_rev for filtering criteria
   reward_normalization:
@@ -105,8 +104,5 @@ trainer:
   val_before_train: True
   n_gpus_per_node: ${n_gpus_per_node}
   test_freq: ${test_freq}
-  generations_to_log_to_wandb: 
-    train: 128 # TODO: will be implemented
-    val: 20
   logger: [ 'console', 'wandb' ] # 
   val_only: False
