@@ -141,13 +141,15 @@ class AgentTrainer(RayPPOTrainer):
         assert self.multi_turn_rollout is not None, "multi_turn_rollout should be initialized"
         
         # Run multi-turn rollout to get complete trajectories
-        final_rollout_states = self.multi_turn_rollout.rollout()
+        self.multi_turn_rollout.rollout()
         
+        final_rollout_states = self.multi_turn_rollout._collect_final_rollout_states()
         # Build update batch containing full trajectories and rewards
         # This already returns a complete DataProto with all necessary fields
         rollout_batch = self.multi_turn_rollout.build_ppo_batch(final_rollout_states)
         
-        rollout_batch, filter_metrics = self.multi_turn_rollout.filter_rollout(rollout_batch)
+        
+        rollout_batch, filter_metrics = self.multi_turn_rollout.filter_rollout(rollout_batch) 
        
         
         # Return the complete DataProto and metrics as tuple consistently
@@ -257,6 +259,7 @@ class AgentTrainer(RayPPOTrainer):
                     batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object)
 
                     batch.batch["response_mask"] = batch.batch["loss_mask"]
+
                     # Balance the number of valid tokens across DP ranks.
                     # NOTE: This usually changes the order of data in the `batch`,
                     # which won't affect the advantage calculation (since it's based on uid),
@@ -264,6 +267,7 @@ class AgentTrainer(RayPPOTrainer):
                     # TODO: Decouple the DP balancing and mini-batching.
                     if self.config.trainer.balance_batch:
                         self._balance_batch(batch, metrics=metrics)
+
 
                     # compute global_valid tokens
                     batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
@@ -487,8 +491,9 @@ class AgentTrainer(RayPPOTrainer):
             assert self.multi_turn_rollout is not None, "multi_turn_rollout should be initialized"
             
             # ✅ MODIFICATION: Call rollout() first, then build_ppo_batch() 
-            final_env_outs = self.multi_turn_rollout.rollout()
-            test_batch = self.multi_turn_rollout.build_ppo_batch()
+            self.multi_turn_rollout.rollout()
+            rollout_states = self.multi_turn_rollout._collect_final_rollout_states()
+            test_batch = self.multi_turn_rollout.build_ppo_batch(rollout_states)
             
             end_time = time.time()
             

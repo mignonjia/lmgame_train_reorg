@@ -172,6 +172,18 @@ class SokobanAgent:
 
         # ✅ DEBUG: Print messages systematically
         # self._debug_print_messages(f"GET_LLM_PROMPTS")
+
+        # Ad hoc fix for the messages format - merge Message 2 and Message 3 if both are USER - for future loss mask computation
+        if len(self.messages) >= 3 and self.messages[1]["role"] == "user" and self.messages[2]["role"] == "user":
+            # Merge Message 2 and Message 3 content
+            merged_content = self.messages[1]["content"] + "\n" + self.messages[2]["content"]
+            self.messages[1]["content"] = merged_content
+            # Remove Message 3
+            self.messages.pop(2)
+
+        # print(f"="*80)
+        # print(f"Reformatted messages: {repr(self.messages)}")
+        # print(f"="*80)
         
         return self.messages
 

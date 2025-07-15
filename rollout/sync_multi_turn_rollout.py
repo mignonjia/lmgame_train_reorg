@@ -402,7 +402,21 @@ class SyncMultiTurnRollout:
         """
         rollout_filter_ratio = self.cfg.rollout.rollout_filter_ratio
         num_groups, group_size = self.agent_group_num, self.agent_group_size
+
+        print("=" * 80)
+        print("DEBUG: empty data proto problem in the filter_rollout")
+        print("=" * 80)
+        
+        print(f"[DEBUG FILTER] rollout_filter_ratio: {rollout_filter_ratio}")
+        print(f"[DEBUG FILTER] num_groups: {num_groups}, group_size: {group_size}")
+        print(f"[DEBUG FILTER] Expected total batch size: {num_groups * group_size}")
+        
         rm_scores = rollout_batch.batch["rm_scores"].sum(dim=-1).view(num_groups, group_size)
+        print(f"[DEBUG FILTER] rm_scores shape: {rm_scores.shape}")
+        print(f"[DEBUG FILTER] rm_scores: {rm_scores}")
+        
+        selected_groups = int(rollout_filter_ratio * num_groups)
+        print(f"[DEBUG FILTER] Will select {selected_groups} groups out of {num_groups}")
 
 
         in_group_std = rm_scores.std(dim=-1)
@@ -418,11 +432,20 @@ class SyncMultiTurnRollout:
         else:
             raise ValueError(f"Invalid rollout filter type: {self.cfg.rollout.rollout_filter_type}")
 
+        print(f"[DEBUG FILTER] top_groups: {top_groups}")
+        print(f"[DEBUG FILTER] in_group_std: {in_group_std}")
+        
         mask = torch.zeros(num_groups, dtype=torch.bool)
         mask[top_groups] = True
         mask = mask.unsqueeze(1).expand(-1, group_size).flatten()
+        
+        print(f"[DEBUG FILTER] mask shape: {mask.shape}")
+        print(f"[DEBUG FILTER] mask sum (selected items): {mask.sum()}")
+        print(f"[DEBUG FILTER] Original batch size: {rollout_batch.batch.batch_size}")
 
         rollout_batch.batch = rollout_batch.batch[mask]
+        
+        print(f"[DEBUG FILTER] Final batch size: {rollout_batch.batch.batch_size}")
 
         for key, value in rollout_batch.non_tensor_batch.items():
             if isinstance(value, np.ndarray):
@@ -478,10 +501,10 @@ class SyncMultiTurnRollout:
             # Get messages from agent's get_llm_prompts method
             messages = agent.get_llm_prompts(env_out)
 
-            messages_list.append(messages)
-
             # NOTE: this assertion is important for loss mask computation
             assert all(msg["role"] == "assistant" for msg in messages[2::2])
+            
+            messages_list.append(messages)
             
             # Apply chat template to convert messages to text
             try:
@@ -516,7 +539,7 @@ class SyncMultiTurnRollout:
             "position_ids": position_ids,
             "responses": input_ids[:, 1:], # remove the first token
             'loss_mask': loss_mask,
-            'rm_score': normalized_score_tensor,
+            'rm_scores': normalized_score_tensor,
         }, batch_size=input_ids.shape[0])
 
         llm_inputs.non_tensor_batch = {

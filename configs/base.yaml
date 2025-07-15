@@ -20,6 +20,9 @@ rollout:
   enable_response_mask: True  # for stability
   rollout_filter_ratio: 0.25  # filter ratio for rollout selection
   rollout_filter_type: std  # std or std_rev for filtering criteria
+  reward_normalization:
+    grouping: "state" # state / batch / inductive
+    method: "identity" # asym_clip / identity / mean_std
 
 # ------ Training Parameters ------
 train_batch_size: 128
