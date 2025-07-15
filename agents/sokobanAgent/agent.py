@@ -48,6 +48,7 @@ class SokobanAgent:
         self.max_turns = self.agent_config.get('max_turns', 5)
         self.max_actions_all_turns = self.agent_config.get('max_actions_all_turns', 10)
         self.max_actions_per_turn = self.agent_config.get('max_actions_per_turn', 5)
+        self.max_tokens = self.agent_config.get('max_tokens', 100)
         self.format_penalty = self.agent_config.get('format_penalty', 0.0)
         self.enable_think = self.agent_config.get('enable_think', True)
         
@@ -56,11 +57,9 @@ class SokobanAgent:
         self.prompt = self._build_enhanced_prompt(self.prompt)
         
         if self.enable_think:
-            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {turns_remaining} turns left. ALWAYS respond in a format: <think>reasoning</think><answer>actions</answer>
-                                        Example: <think>I need to move right to reach the box, then push it up to the target.</think><answer>Right || Up</answer>"""
+            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {actions_remaining} actions remaining. Always output: <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
         else:
-            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {turns_remaining} turns left. ALWAYS respond in format: <answer>actions</answer>
-                                        Example: <answer>Right || Up</answer>"""
+            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {actions_remaining} actions remaining. Always output: <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
 
         self.initialize_env()
         self.trajectory_history = []
@@ -85,7 +84,9 @@ class SokobanAgent:
             actions = list(self.env_config["action_lookup"].values())
             action_lookup_str = "\nYour available actions are:\n" + ", ".join(actions)
             enhanced_prompt += action_lookup_str
-            
+
+        enhanced_prompt += f"\n\nGame Rules:\n- You have {self.max_turns} turns to solve this puzzle\n- Each turn you can make up to {self.max_actions_per_turn} actions\n- Total actions allowed across all turns: {self.max_actions_all_turns}\n- Separate multiple actions with ' || ' (e.g., 'Up || Right || Down')"
+
         return enhanced_prompt
 
     def initialize_env(self):
@@ -119,22 +120,12 @@ class SokobanAgent:
             
             # Truncate very long content for readability
             content_preview = content
-            if role.upper() == "ASSISTANT":
-                if raw_response_count < len(self.raw_response_list):
-                    print(f"Raw Response: {self.raw_response_list[raw_response_count]}")
-                    raw_response_count += 1
+            # if role.upper() == "ASSISTANT":
+                # if raw_response_count < len(self.raw_response_list):
+                #     print(f"Raw Response: {self.raw_response_list[raw_response_count]}")
+                #     raw_response_count += 1
             print(f"  Content: {repr(content_preview)}")
             print(f"  Length: {len(content)} chars")
-            
-            # Special handling for assistant messages to show parsing
-            if role == 'assistant':
-                try:
-                    processed_response, actions = self.parse_model_response(content, self.enable_think)
-                    print(f"  Parsed actions: {actions}")
-                    print(f"  Action count: {len(actions)}")
-                except Exception as e:
-                    print(f"  ❌ Parse error: {e}")
-            
             print("-" * 40)
         
         # Print current Sokoban layout
@@ -152,17 +143,21 @@ class SokobanAgent:
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": self.prompt}
             ]
+    
         
-        if env_out.reward != 0.0:
-            reward_msg = {"role": "user", "content": f"Reward: {env_out.reward}"}
-            self.messages.append(reward_msg)
+        # Calculate actions remaining based on max_actions_all_turns
+        actions_remaining = max(0, self.max_actions_all_turns - self.total_actions_consumed)
         
         turn_content = self.turn_prompt_template.format(
             turn_number=self.cur_turn + 1,
             state=env_out.state,
-            turns_remaining=self.max_turns - self.cur_turn
+            actions_remaining=actions_remaining,
+            max_tokens=self.max_tokens
         )
         turn_msg = {"role": "user", "content": turn_content}
+        if self.cur_turn > 0:
+            reward_msg = f"Reward: {env_out.reward}"
+            turn_msg["content"] =  reward_msg + " " + turn_msg["content"]
         self.messages.append(turn_msg)
         
         # Validate final messages before returning
@@ -191,6 +186,11 @@ class SokobanAgent:
             Tuple[str, List[str]]: (processed_llm_response, actions_list)
         """
         import re
+
+        if enable_think:
+            llm_response = '<think>' + llm_response
+        else:
+            llm_response = '<answer>' + llm_response
         
         # Define pattern based on enable_think
         pattern = r'<think>(.*?)</think>\s*<answer>(.*?)</answer>' if enable_think else r'<answer>(.*?)</answer>'
@@ -224,6 +224,11 @@ class SokobanAgent:
                 processed_response = f"<think>{think_content}</think><answer>{action_content}</answer>"
             else:
                 processed_response = f"<answer>{action_content}</answer>"
+
+        print("-" * 80)
+        print(f"processed_response: {processed_response}")
+        print(f"actions: {actions}")
+        print("-" * 80)
         
         return processed_response, actions
 
@@ -248,21 +253,35 @@ class SokobanAgent:
         info = {}  # Initialize info dictionary
         
         action_lookup_reverse = {v: k for k, v in self.env_config['action_lookup'].items()}
+        # Create case-insensitive lookup for better fault tolerance
+        action_lookup_reverse_lower = {v.lower(): k for k, v in self.env_config['action_lookup'].items()}
         
         valid_actions = []
         invalid_actions = []
         
         for action_str in actions:
             try:
-                if action_str in action_lookup_reverse:
-                    action = action_lookup_reverse[action_str]
+                action_str_clean = action_str.strip()
+                
+                # First try exact match
+                if action_str_clean in action_lookup_reverse:
+                    action = action_lookup_reverse[action_str_clean]
+                    # ✅ FAULT TOLERANCE: Validate action is in expected range
+                    if action in self.env_config['action_lookup']:
+                        valid_actions.append(action)
+                    else:
+                        invalid_actions.append(action_str)
+                # Then try case-insensitive match
+                elif action_str_clean.lower() in action_lookup_reverse_lower:
+                    action = action_lookup_reverse_lower[action_str_clean.lower()]
                     # ✅ FAULT TOLERANCE: Validate action is in expected range
                     if action in self.env_config['action_lookup']:
                         valid_actions.append(action)
                     else:
                         invalid_actions.append(action_str)
                 else:
-                    action = int(action_str)
+                    # Try parsing as integer
+                    action = int(action_str_clean)
                     # ✅ FAULT TOLERANCE: Validate numeric action is in expected range  
                     if action in self.env_config['action_lookup']:
                         valid_actions.append(action)

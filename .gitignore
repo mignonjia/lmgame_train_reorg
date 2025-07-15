@@ -133,3 +133,5 @@ test_logs/
 run_logs/
 
 cache/
+
+cache_example/

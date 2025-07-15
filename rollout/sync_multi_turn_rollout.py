@@ -135,21 +135,20 @@ class SyncMultiTurnRollout:
                 prompt_str = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
             except Exception as e:
                 prompt_str = "System error in chat template"
+
+            if self.agent_config.get('enable_think', True):
+                prompt_str += "<think>"
+            else:
+                prompt_str += "<answer>"
+            print("="*80)
+            print(f"llm prompt text preview: {repr(prompt_str)}")
+            print("="*80)
             
             # Add answer format prompt based on agent's enable_think setting
             agent = self.agents[idx]
         
             
             llm_input_texts.append(prompt_str)
-        
-
-        
-        # Check prompt statistics
-        empty_prompts = sum(1 for p in llm_input_texts if not p or len(p.strip()) == 0)
-        total_length = sum(len(p) for p in llm_input_texts)
-        print(f"   Empty prompts: {empty_prompts}/{len(llm_input_texts)}")
-        print(f"   Total character count: {total_length}")
-        print(f"   Average length: {total_length/len(llm_input_texts) if llm_input_texts else 0:.1f}")
         
         # Tokenize all prompts using verl_F for more universal processing
         batch_list = []
@@ -365,6 +364,7 @@ class SyncMultiTurnRollout:
             
             # Apply chat template
             text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=False)
+          
             llm_input_texts.append(text)
             messages_list.append(messages)
         
