@@ -122,108 +122,6 @@ class AgentTrainer(RayPPOTrainer):
             processor=self.processor
         )
 
-    def _filter_rollout(self, batch: DataProto):
-        """
-        Filter rollout based on in-group statistics. We want groups with high-quality rollouts
-        that deviate significantly from the mean.
-        
-        Args:
-            batch: DataProto containing rollout data
-            
-        Returns:
-            tuple: (filtered_batch, metrics_dict)
-        """
-        rollout_filter_ratio = getattr(self.config.rollout, 'rollout_filter_ratio', 1.0)
-        rollout_filter_type = getattr(self.config.rollout, 'rollout_filter_type', 'std')
-        
-        # Use rollout config instead of es_manager config
-        num_groups = self.config.rollout.agent_group_num
-        group_size = self.config.rollout.agent_group_size
-
-        # Get RM scores and reshape to groups
-        rm_scores = batch.batch["rm_scores"].sum(dim=-1).view(num_groups, group_size)
-        
-        # Calculate in-group statistics
-        in_group_std = rm_scores.std(dim=-1)
-        in_group_max = rm_scores.max(dim=-1).values
-        in_group_mean = rm_scores.mean(dim=-1)
-        
-        # If no filtering (ratio = 1), return all data
-        if rollout_filter_ratio >= 1.0:
-            metrics = {
-                "rollout/in_group_std": in_group_std.mean(),
-                "rollout/in_group_max": in_group_max.mean(),
-                "rollout/in_group_mean": in_group_mean.mean(),
-                "rollout/chosen_in_group_std": in_group_std.mean(),
-                "rollout/chosen_in_group_max": in_group_max.mean(),
-                "rollout/chosen_in_group_mean": in_group_mean.mean()
-            }
-            return batch, metrics
-
-        # Select top groups based on filter type
-        num_groups_to_keep = max(1, int(rollout_filter_ratio * num_groups))
-        
-        if rollout_filter_type == "std_rev":
-            top_groups = (-in_group_std).topk(num_groups_to_keep).indices
-        elif rollout_filter_type == "std":
-            top_groups = in_group_std.topk(num_groups_to_keep).indices
-        else:
-            raise ValueError(f"Invalid rollout filter type: {rollout_filter_type}")
-
-        # Create mask for selected groups
-        mask = torch.zeros(num_groups, dtype=torch.bool)
-        mask[top_groups] = True
-        mask = mask.unsqueeze(1).expand(-1, group_size).flatten()
-
-        # Filter batch tensors - maintain TensorDict structure
-        filtered_batch = DataProto()
-        filtered_tensor_dict = {}
-        
-        for key, value in batch.batch.items():
-            if isinstance(value, torch.Tensor):
-                filtered_tensor_dict[key] = value[mask]
-            else:
-                filtered_tensor_dict[key] = value
-        
-        # Create new TensorDict with filtered tensors
-        try:
-            from tensordict import TensorDict
-            filtered_batch.batch = TensorDict(
-                filtered_tensor_dict,
-                batch_size=mask.sum().item(),
-                device=next(iter(filtered_tensor_dict.values())).device if filtered_tensor_dict else None
-            )
-        except ImportError:
-            # Fallback to regular dict if TensorDict not available
-            filtered_batch.batch = filtered_tensor_dict
-
-        # Filter non-tensor batch
-        filtered_batch.non_tensor_batch = {}
-        for key, value in batch.non_tensor_batch.items():
-            if isinstance(value, np.ndarray):
-                filtered_batch.non_tensor_batch[key] = value[mask.cpu().numpy()]
-            elif isinstance(value, list):
-                filtered_batch.non_tensor_batch[key] = [v for v, m in zip(value, mask.cpu().numpy()) if m]
-            else:
-                filtered_batch.non_tensor_batch[key] = value
-
-        # Copy meta_info
-        filtered_batch.meta_info = batch.meta_info.copy() if batch.meta_info else {}
-
-        # Calculate metrics
-        metrics = {
-            "rollout/in_group_std": in_group_std.mean(),
-            "rollout/in_group_max": in_group_max.mean(),
-            "rollout/in_group_mean": in_group_mean.mean(),
-            "rollout/chosen_in_group_std": in_group_std[top_groups].mean(),
-            "rollout/chosen_in_group_max": in_group_max[top_groups].mean(),
-            "rollout/chosen_in_group_mean": in_group_mean[top_groups].mean(),
-            "rollout/filter_ratio_actual": len(top_groups) / num_groups,
-            "rollout/groups_kept": len(top_groups),
-            "rollout/total_groups": num_groups
-        }
-
-        return filtered_batch, metrics
 
     def _generate_multi_turn_sequences(self, gen_batch: DataProto) -> tuple[DataProto, dict]:
         """
@@ -249,16 +147,8 @@ class AgentTrainer(RayPPOTrainer):
         # This already returns a complete DataProto with all necessary fields
         rollout_batch = self.multi_turn_rollout.build_ppo_batch(final_rollout_states)
         
-        # Apply rollout filtering if enabled
-        rollout_filter_ratio = getattr(self.config.rollout, 'rollout_filter_ratio', 1.0)
-        if rollout_filter_ratio < 1.0:
-            rollout_batch, filter_metrics = self._filter_rollout(rollout_batch)
-            # Add filter metrics to batch meta_info
-            if rollout_batch.meta_info is None:
-                rollout_batch.meta_info = {}
-            rollout_batch.meta_info.update(filter_metrics)
-        else:
-            filter_metrics = {}
+        rollout_batch, filter_metrics = self.multi_turn_rollout.filter_rollout(rollout_batch)
+       
         
         # Return the complete DataProto and metrics as tuple consistently
         return rollout_batch, filter_metrics
@@ -344,22 +234,24 @@ class AgentTrainer(RayPPOTrainer):
                         if "timing" in batch.meta_info:
                             timing_raw.update(batch.meta_info["timing"])
                             batch.meta_info.pop("timing", None)
+                    
 
-                    if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
-                        with marked_timer("gen_max", timing_raw, color="purple"):
-                            gen_baseline_batch = deepcopy(gen_batch)
-                            gen_baseline_batch.meta_info["do_sample"] = False
-                            gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
 
-                            batch = batch.union(gen_baseline_output)
-                            reward_baseline_tensor = self.reward_fn(batch)
-                            reward_baseline_tensor = reward_baseline_tensor.sum(dim=-1)
+                    # if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
+                    #     with marked_timer("gen_max", timing_raw, color="purple"):
+                    #         gen_baseline_batch = deepcopy(gen_batch)
+                    #         gen_baseline_batch.meta_info["do_sample"] = False
+                    #         gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
 
-                            batch.pop(batch_keys=list(gen_baseline_output.batch.keys()))
+                    #         batch = batch.union(gen_baseline_output)
+                    #         reward_baseline_tensor = self.reward_fn(batch)
+                    #         reward_baseline_tensor = reward_baseline_tensor.sum(dim=-1)
 
-                            batch.batch["reward_baselines"] = reward_baseline_tensor
+                    #         batch.pop(batch_keys=list(gen_baseline_output.batch.keys()))
 
-                            del gen_baseline_batch, gen_baseline_output
+                    #         batch.batch["reward_baselines"] = reward_baseline_tensor
+
+                    #         del gen_baseline_batch, gen_baseline_output
 
                     # Add UIDs after batch is populated with actual data
                     batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object)

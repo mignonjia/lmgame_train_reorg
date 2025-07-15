@@ -272,7 +272,8 @@ class SyncMultiTurnRollout:
             pad_dataproto_to_divisor = None
             unpad_dataproto = None
         
-        if RayWorkerGroup is not None and isinstance(self.actor_wg, RayWorkerGroup):
+        if (RayWorkerGroup is not None and isinstance(self.actor_wg, RayWorkerGroup) and 
+            pad_dataproto_to_divisor is not None and unpad_dataproto is not None):
             padded_lm_inputs, pad_size = pad_dataproto_to_divisor(lm_inputs, self.actor_wg.world_size)
             padded_lm_outputs = self.actor_wg.generate_sequences(padded_lm_inputs)
             lm_outputs = unpad_dataproto(padded_lm_outputs, pad_size=pad_size)
@@ -284,7 +285,7 @@ class SyncMultiTurnRollout:
         return lm_outputs
 
     # ─────────────────── MAIN ROLLOUT LOOP ───────────────────
-    def rollout(self):
+    def rollout(self) -> DataProto:
         """
         Main rollout loop using batch LLM prompts approach.
         Iterate cfg.agent.max_turn turns, breaking early if all done.
@@ -307,10 +308,139 @@ class SyncMultiTurnRollout:
             #TODO: Early stopping. If max_actions_all_turns is reached or env is done, break.
             
             self.step_cnt += 1
+        
+        final_batch_prompts = self.get_batch_llm_prompts(self.env_outs)
 
-        return self.env_outs
+        return final_batch_prompts
 
     # ─────────────────── PPO BATCH BUILDING ───────────────────
+
+    def get_masks_and_scores(self, input_ids: torch.Tensor, all_scores: List[List[float]] | None = None, use_turn_scores: bool = False):
+        """
+        input_ids: shape (bsz, seq_len)
+        Get loss mask that only learns between <|im_start|>assistant and <|im_end|>. Currently only supports qwen.
+        NOTE: important! This assumes that the input_ids starts with system and then user & assistant in alternative ways
+        """
+        special_token = self.tokenizer.encode("<|im_start|>")[0]
+        turn_starts = torch.where(input_ids == special_token, 1, 0)
+        turn_indicators = torch.cumsum(turn_starts, dim=-1)
+        response_mask = (turn_indicators % 2 == 1) & (turn_indicators > 1) # only learns all assistant turns
+        loss_mask = (turn_indicators > 1) # learns everything after system prompt
+
+        reward_token = self.tokenizer.encode("<|im_end|>")[0]
+        score_tensor = torch.zeros_like(input_ids, dtype=torch.float32)
+        if all_scores is not None:
+            if use_turn_scores:
+                for idx, scores in enumerate(list(zip(*all_scores))):
+                    scores = torch.tensor(scores, dtype=torch.float32)
+                    turn_indicator = idx * 2 + 3 # 0: pad. 1: system. 2+2n: user. 3+2n: assistant
+                    reward_position = (input_ids == reward_token) & (turn_indicators == turn_indicator)
+                    score_tensor[reward_position] = scores
+            else:
+                scores = [sum(i) for i in all_scores]
+                score_tensor[:, -1] = torch.tensor(scores, dtype=torch.float32)
+        loss_mask = loss_mask[:, :-1] # remove the last token
+        score_tensor = score_tensor[:, 1:] # remove the first token
+
+        return loss_mask, score_tensor, response_mask
+
+    def _normalize_score_tensor(self, score_tensor: torch.Tensor, env_outputs: List[Dict]) -> torch.Tensor:
+        """
+        Normalize the score tensor to be between 0 and 1.
+        NOTE: only support score at the last token for now
+        """
+        assert self.cfg.rollout.use_turn_scores == False, "Reward normalization is not supported for use_turn_scores == True"
+        
+        rn_cfg = self.cfg.rollout.reward_normalization
+        grouping, method = rn_cfg.grouping, rn_cfg.method
+        if grouping == "state":
+            group_tags = [env_output["group_id"] for env_output in env_outputs]
+        elif grouping == "inductive":
+            group_tags = [env_output["tag"] for env_output in env_outputs]
+        elif grouping == "batch":
+            group_tags = [1] * len(env_outputs)
+        else:
+            raise ValueError(f"Invalid grouping: {grouping}")
+
+
+        if method == "mean_std":
+            norm_func = lambda x: (x - x.mean(dim=-1, keepdim=True)) / (x.std(dim=-1, keepdim=True) + 1e-6) if x.std(dim=-1, keepdim=True).abs().max() > 1e-6 else torch.zeros_like(x) # stable to bf16 than x.std()
+        elif method == "mean":
+            norm_func = lambda x: (x - x.mean(dim=-1, keepdim=True))
+        elif method == "asym_clip":
+            norm_func = lambda x: ((x - x.mean(dim=-1, keepdim=True)) / (x.std(dim=-1, keepdim=True) + 1e-6) if x.std(dim=-1, keepdim=True).abs().max() > 1e-6 else torch.zeros_like(x)).clamp(min=-1, max=3)
+        elif method == "identity":
+            norm_func = lambda x: x
+        else:
+            raise ValueError(f"Invalid normalization method: {method}")
+
+        # apply groupwise normalization
+        group2index = {}
+        for i, env_tag in enumerate(group_tags):
+            if env_tag not in group2index:
+                group2index[env_tag] = []
+            group2index[env_tag].append(i)
+        group2index = {k: torch.tensor(v) for k, v in group2index.items()}
+
+        
+        acc_scores = score_tensor[:, -1]
+        normalized_acc_scores = acc_scores.clone()
+        for group, index in group2index.items():
+            normalized_acc_scores[index] = norm_func(normalized_acc_scores[index])
+
+        # apply penalty
+        penalty = torch.tensor([env_output["penalty"] for env_output in env_outputs], dtype=torch.float32)
+        normalized_acc_scores = normalized_acc_scores + penalty
+
+        score_tensor[:, -1] = normalized_acc_scores
+
+        return score_tensor
+
+    def filter_rollout(self, rollout_batch: DataProto) -> DataProto:
+        """
+        Filter rollout batch based on the filter ratio.
+        """
+        rollout_filter_ratio = self.cfg.rollout.rollout_filter_ratio
+        num_groups, group_size = self.agent_group_num, self.agent_group_size
+        rm_scores = rollout_batch.batch["rm_scores"].sum(dim=-1).view(num_groups, group_size)
+
+
+        in_group_std = rm_scores.std(dim=-1)
+        in_group_max = rm_scores.max(dim=-1).values
+        in_group_mean = rm_scores.mean(dim=-1)
+        if rollout_filter_ratio == 1:
+            return rollout_batch, {"rollout/in_group_std": in_group_std.mean(), "rollout/in_group_max": in_group_max.mean(), "rollout/in_group_mean": in_group_mean.mean(), "rollout/chosen_in_group_std": in_group_std.mean(), "rollout/chosen_in_group_max": in_group_max.mean(), "rollout/chosen_in_group_mean": in_group_mean.mean()}
+
+        if self.cfg.rollout.rollout_filter_type == "std_rev":
+            top_groups = (-in_group_std).topk(int(rollout_filter_ratio * num_groups)).indices
+        elif self.cfg.rollout.rollout_filter_type == "std":
+            top_groups = in_group_std.topk(int(rollout_filter_ratio * num_groups)).indices
+        else:
+            raise ValueError(f"Invalid rollout filter type: {self.cfg.rollout.rollout_filter_type}")
+
+        mask = torch.zeros(num_groups, dtype=torch.bool)
+        mask[top_groups] = True
+        mask = mask.unsqueeze(1).expand(-1, group_size).flatten()
+
+        rollout_batch.batch = rollout_batch.batch[mask]
+
+        for key, value in rollout_batch.non_tensor_batch.items():
+            if isinstance(value, np.ndarray):
+                rollout_batch.non_tensor_batch[key] = value[mask]
+            else:
+                rollout_batch.non_tensor_batch[key] = [v for v, m in zip(value, mask) if m]
+
+        metrics = {
+            "rollout/in_group_std": in_group_std.mean(),
+            "rollout/in_group_max": in_group_max.mean(),
+            "rollout/in_group_mean": in_group_mean.mean(),
+            "rollout/chosen_in_group_std": in_group_std[top_groups].mean(),
+            "rollout/chosen_in_group_max": in_group_max[top_groups].mean(),
+            "rollout/chosen_in_group_mean": in_group_mean[top_groups].mean()
+        }
+        return rollout_batch, metrics
+
+
     def _collect_final_rollout_states(self) -> List[Dict]:
         """
         Collect final rollout states from all agents.
@@ -325,6 +455,8 @@ class SyncMultiTurnRollout:
             env_outputs.append(rollout_state)
         return env_outputs
 
+
+
     def build_ppo_batch(self, rollout_states: List[Dict]) -> DataProto:
         """
         Build PPO batch from the final batch rollout states.
@@ -332,15 +464,82 @@ class SyncMultiTurnRollout:
         """
         llm_input_texts = []
         messages_list = []
-        for rollout_state in rollout_states:
-            agent_id = rollout_state['env_id']
-            agent_tag = rollout_state['tag']
-            if 'state' in rollout_state['hisotory'][-1]:
-                rollout_state['history'] = rollout_state['history'][:-1]
-            messages = [
-                {"role": "system", "content": self.agent_config['system_prompt']}, 
-                {"role": "user", "content": self.prefix_lookup[env_output["env_id"]]}
-            ]
+        # Loop through all agents to collect their LLM prompts
+        for idx, agent in enumerate(self.agents):
+            # Get the current environment output for this agent
+            env_out = self.env_outs[idx] if self.env_outs else None
+
+            
+            if env_out is None:
+                # Handle case where env_outs is not initialized
+                llm_input_texts.append("")
+                continue
+            
+            # Get messages from agent's get_llm_prompts method
+            messages = agent.get_llm_prompts(env_out)
+
+            messages_list.append(messages)
+
+            # NOTE: this assertion is important for loss mask computation
+            assert all(msg["role"] == "assistant" for msg in messages[2::2])
+            
+            # Apply chat template to convert messages to text
+            try:
+                prompt_text = self.tokenizer.apply_chat_template(
+                    messages, 
+                    tokenize=False, 
+                    add_generation_prompt=True
+                )
+            except Exception as e:
+                # Fallback in case of chat template error
+                prompt_text = "System error in chat template"
+            
+            # Append the text to llm_input_texts
+            llm_input_texts.append(prompt_text)
+        
+        # when prepare for update, we do not add the state from the n+1 turn
+        if 'state' in rollout_states[-1]['history'][-1]:
+            rollout_states[-1]['history'] = rollout_states[-1]['history'][:-1]
+        
+        inputs = self.tokenizer(llm_input_texts, return_tensors="pt", padding=True, padding_side="left", truncation=False) # do not truncate here. Process later at TODO
+        input_ids, attention_mask = inputs.input_ids, inputs.attention_mask
+        position_ids = attention_mask.cumsum(dim=-1)
+        scores = [[i['reward'] for i in env_output['history']] for env_output in rollout_states]
+        loss_mask, score_tensor, response_mask = self.get_masks_and_scores(input_ids, scores, use_turn_scores=self.cfg.rollout.use_turn_scores)
+        normalized_score_tensor = self._normalize_score_tensor(score_tensor, rollout_states)
+        response_length = response_mask.sum(dim=-1).float().mean().item()
+
+        llm_inputs = DataProto()
+        llm_inputs.batch = TensorDict({
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "position_ids": position_ids,
+            "responses": input_ids[:, 1:], # remove the first token
+            'loss_mask': loss_mask,
+            'rm_score': normalized_score_tensor,
+        }, batch_size=input_ids.shape[0])
+
+        llm_inputs.non_tensor_batch = {
+            "env_ids": np.array([env_output["env_id"] for env_output in rollout_states], dtype=object),
+            "group_ids": np.array([env_output["group_id"] for env_output in rollout_states], dtype=object),
+            "messages_list": np.array(messages_list, dtype=object),
+        }
+
+        metrics = {}
+        for env_output in rollout_states:
+            for key, value in env_output["metrics"].items():
+                if key not in metrics:
+                        metrics[key] = []
+                metrics[key].append(value)
+        metrics = {
+            key: np.sum(value) / (self.agent_group_num * self.agent_group_size)
+            for key, value in metrics.items()
+        }
+        metrics["response_length"] = response_length
+        llm_inputs.meta_info = {"metrics": metrics}
+
+        return llm_inputs
+
 
        
 
