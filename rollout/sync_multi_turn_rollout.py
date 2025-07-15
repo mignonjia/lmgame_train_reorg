@@ -140,9 +140,6 @@ class SyncMultiTurnRollout:
                 prompt_str += "<think>"
             else:
                 prompt_str += "<answer>"
-            # print("="*80)
-            # print(f"llm prompt text preview: {repr(prompt_str)}")
-            # print("="*80)
             
             # Add answer format prompt based on agent's enable_think setting
             agent = self.agents[idx]
@@ -402,21 +399,10 @@ class SyncMultiTurnRollout:
         """
         rollout_filter_ratio = self.cfg.rollout.rollout_filter_ratio
         num_groups, group_size = self.agent_group_num, self.agent_group_size
-
-        print("=" * 80)
-        print("DEBUG: empty data proto problem in the filter_rollout")
-        print("=" * 80)
-        
-        print(f"[DEBUG FILTER] rollout_filter_ratio: {rollout_filter_ratio}")
-        print(f"[DEBUG FILTER] num_groups: {num_groups}, group_size: {group_size}")
-        print(f"[DEBUG FILTER] Expected total batch size: {num_groups * group_size}")
         
         rm_scores = rollout_batch.batch["rm_scores"].sum(dim=-1).view(num_groups, group_size)
-        print(f"[DEBUG FILTER] rm_scores shape: {rm_scores.shape}")
-        print(f"[DEBUG FILTER] rm_scores: {rm_scores}")
         
         selected_groups = int(rollout_filter_ratio * num_groups)
-        print(f"[DEBUG FILTER] Will select {selected_groups} groups out of {num_groups}")
 
 
         in_group_std = rm_scores.std(dim=-1)
@@ -431,21 +417,13 @@ class SyncMultiTurnRollout:
             top_groups = in_group_std.topk(int(rollout_filter_ratio * num_groups)).indices
         else:
             raise ValueError(f"Invalid rollout filter type: {self.cfg.rollout.rollout_filter_type}")
-
-        print(f"[DEBUG FILTER] top_groups: {top_groups}")
-        print(f"[DEBUG FILTER] in_group_std: {in_group_std}")
         
         mask = torch.zeros(num_groups, dtype=torch.bool)
         mask[top_groups] = True
         mask = mask.unsqueeze(1).expand(-1, group_size).flatten()
-        
-        print(f"[DEBUG FILTER] mask shape: {mask.shape}")
-        print(f"[DEBUG FILTER] mask sum (selected items): {mask.sum()}")
-        print(f"[DEBUG FILTER] Original batch size: {rollout_batch.batch.batch_size}")
 
         rollout_batch.batch = rollout_batch.batch[mask]
         
-        print(f"[DEBUG FILTER] Final batch size: {rollout_batch.batch.batch_size}")
 
         for key, value in rollout_batch.non_tensor_batch.items():
             if isinstance(value, np.ndarray):
