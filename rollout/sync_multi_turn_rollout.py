@@ -501,6 +501,14 @@ class SyncMultiTurnRollout:
         # when prepare for update, we do not add the state from the n+1 turn
         if 'state' in rollout_states[-1]['history'][-1]:
             rollout_states[-1]['history'] = rollout_states[-1]['history'][:-1]
+
+        print("="*80)
+        print(f"DEBUG: llm_input_texts and messages_list")
+        for i in range(len(llm_input_texts)):
+            print(f"DEBUG: llm_input_texts[{i}]: {repr(llm_input_texts[i])}")
+        for j in range(len(messages_list)):
+            print(f"DEBUG: messages_list[{j}]: {repr(messages_list[j])}")
+        print("="*80)
         
         inputs = self.tokenizer(llm_input_texts, return_tensors="pt", padding=True, padding_side="left", truncation=False) # do not truncate here. Process later at TODO
         input_ids, attention_mask = inputs.input_ids, inputs.attention_mask
