@@ -238,7 +238,7 @@ class SokobanAgent:
 
         # Store raw response for debugging
         self.raw_response_list.append(llm_raw_response)
-        
+       
         self.cur_turn += 1
 
         processed_llm_response, actions = self.parse_model_response(llm_raw_response, enable_think=self.enable_think)
