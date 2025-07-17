@@ -4,11 +4,11 @@
 
 ### 1. Performance Reproduction
 - **Qwen 2.5-0.5B Sokoban PPO Training** ✅ **Completed** (yuxuan)
-- **Qwen 2.5-7B Sokoban PPO Training** 🔄 **In Progress** (mingjia)
+- **Qwen 2.5-7B Sokoban PPO Training** ✅ **In Progress** (mingjia)
 
 ## Development Roadmap
 
-### 2. Codebase Improvements
+### 2. Codebase Improvements (yuxuan, mingjia)
 
 #### 2.1 Core Agent System
 **Location:** `agents/sokobanAgent/`
@@ -33,11 +33,11 @@
 
 ### 3. Feature Development
 
-#### 3.1 Evaluation Integration
+#### 3.1 Evaluation Integration (lanxiang, yuxuan)
 - [ ] Integrate lmgame-bench evaluation
 - [ ] Abstract agent classes: `env` → `baseAgent` → `gamingAgent`, `trainingAgent`
 
-#### 3.2 Multi-Task Training
+#### 3.2 Multi-Task Training (yuxuan, yixin)
 - [ ] Add support for additional tasks:
   - GSM8K (math reasoning)
   - Blockworld (spatial reasoning)
