@@ -5,26 +5,14 @@ import random
 import yaml
 from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass
-from agents.agent_utils import Trajectory
+from agents.agent_utils import Trajectory, EnvOutput
+from agents.base_agent import BaseAgent
 from agents.sokobanAgent.env import SokobanEnv
 from agents import register_agent
 
-# ─────────────────── DATA STRUCTURES ───────────────────
-@dataclass
-class EnvOutput:
-    """Simple container for environment outputs that SyncMultiTurnRollout expects."""
-    done: bool = False
-    state: str = ""
-    reward: float = 0.0
-    info: Dict[str, Any] = None  # type: ignore
-    
-    def __post_init__(self):
-        if self.info is None:
-            self.info = {}
-
 # ─────────────────── SOKOBAN AGENT ───────────────────
 @register_agent("sokobanAgent")
-class SokobanAgent:
+class SokobanAgent(BaseAgent):
     """
     Sokoban agent that manages environment interactions and conversation history.
     Compatible with SyncMultiTurnRollout interface.

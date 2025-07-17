@@ -5,6 +5,19 @@ import random
 import numpy as np
 from contextlib import contextmanager
 
+# ─────────────────── DATA STRUCTURES ───────────────────
+@dataclass
+class EnvOutput:
+    """Simple container for environment outputs that SyncMultiTurnRollout expects."""
+    done: bool = False
+    state: str = ""
+    reward: float = 0.0
+    info: Dict[str, Any] = None  # type: ignore
+    
+    def __post_init__(self):
+        if self.info is None:
+            self.info = {}
+
 @dataclass
 class Trajectory:
     """Simple trajectory class for storing a single step's information."""
