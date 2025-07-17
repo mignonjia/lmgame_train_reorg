@@ -5,7 +5,7 @@ import random
 import yaml
 from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass
-from agents.agent_utils import Trajectory, EnvOutput
+from agents.agent_utils import SingleTurnTrajectory, MultiTurnTrajectory, EnvOutput
 from agents.base_agent import BaseAgent
 from agents.sokobanAgent.env import SokobanEnv
 from agents import register_agent
@@ -52,7 +52,7 @@ class SokobanAgent(BaseAgent):
             self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {actions_remaining} actions remaining. Always output: <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
 
         self.initialize_env()
-        self.trajectory_history = []
+        self.trajectory_history = MultiTurnTrajectory(max_length=self.max_turns)
         self.raw_response_list = []  # Store all raw LLM responses for debugging
         self.messages = [
             {"role": "system", "content": self.system_prompt},
@@ -318,7 +318,8 @@ class SokobanAgent(BaseAgent):
         )
         
         return EnvOutput(
-            done=done,
+            truncated=done,
+            terminated=done,
             state=obs,
             reward=total_reward,
             info=info
@@ -328,7 +329,8 @@ class SokobanAgent(BaseAgent):
     def get_final_rollout_states(self):
         """Get final rollout states for PPO training."""
         history = []
-        for traj in self.trajectory_history:
+        trajectory_deque = self.trajectory_history.get()
+        for traj in trajectory_deque:
             history_entry = {
                 'state': traj.state,
                 'actions_left': traj.actions_left,
@@ -342,26 +344,26 @@ class SokobanAgent(BaseAgent):
         
         metrics = {}
         
-        success_values = [traj.info.get('success', False) for traj in self.trajectory_history]
+        success_values = [traj.info.get('success', False) for traj in trajectory_deque]
         metrics[f'{self.tag or "sokobanAgent"}/success'] = float(any(success_values))
         
-        total_actions = sum(len(traj.actions) for traj in self.trajectory_history)
+        total_actions = sum(len(traj.actions) for traj in trajectory_deque)
         metrics[f'{self.tag or "sokobanAgent"}/num_actions'] = total_actions
         
-        action_is_effective_values = [traj.info.get('action_is_effective', False) for traj in self.trajectory_history]
+        action_is_effective_values = [traj.info.get('action_is_effective', False) for traj in trajectory_deque]
         if action_is_effective_values:
             metrics[f'{self.tag or "sokobanAgent"}/action_is_effective'] = sum(action_is_effective_values) / len(action_is_effective_values)
         else:
             metrics[f'{self.tag or "sokobanAgent"}/action_is_effective'] = 0.0
         
-        action_is_valid_values = [traj.info.get('action_is_valid', True) for traj in self.trajectory_history]
+        action_is_valid_values = [traj.info.get('action_is_valid', True) for traj in trajectory_deque]
         if action_is_valid_values:
             metrics[f'{self.tag or "sokobanAgent"}/action_is_valid'] = sum(action_is_valid_values) / len(action_is_valid_values)
         else:
             metrics[f'{self.tag or "sokobanAgent"}/action_is_valid'] = 1.0
         
-        if self.trajectory_history:
-            last_traj = self.trajectory_history[-1]
+        if trajectory_deque:
+            last_traj = trajectory_deque[-1]
             if 'metrics' in last_traj.info:
                 for key, value in last_traj.info['metrics'].items():
                     metrics[key] = value
@@ -381,7 +383,7 @@ class SokobanAgent(BaseAgent):
     def update_trajectory_history(self, state: str, actions_left: int, actions: List[int], 
                                  reward: float, info: Dict[str, Any], llm_response: str, llm_raw_response: str):
         """Update agent's trajectory history."""
-        trajectory = Trajectory(
+        self.trajectory_history.add(SingleTurnTrajectory(
             state=state,
             actions_left=actions_left,
             actions=actions,
@@ -389,9 +391,7 @@ class SokobanAgent(BaseAgent):
             info=info,
             llm_response=llm_response,
             llm_raw_response=llm_raw_response
-        )
-        
-        self.trajectory_history.append(trajectory)
+        ))
         
         return self.trajectory_history
     
@@ -412,7 +412,7 @@ class SokobanAgent(BaseAgent):
         
         self.cur_turn = 0
         
-        self.trajectory_history = []
+        self.trajectory_history.clear()
         self.raw_response_list = []
         self.total_actions_consumed = 0
         self.penalty = 0.0  # Reset penalty for new episode
@@ -424,7 +424,8 @@ class SokobanAgent(BaseAgent):
         
         # Return initial environment outputs for the rollout loop
         return EnvOutput(
-            done=False,
+            truncated=False,
+            terminated=False,
             state=obs,
             reward=0.0,
             info={}

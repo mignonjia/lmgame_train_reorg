@@ -4,12 +4,14 @@ from dataclasses import dataclass, field
 import random
 import numpy as np
 from contextlib import contextmanager
+from collections import deque
 
 # ─────────────────── DATA STRUCTURES ───────────────────
 @dataclass
 class EnvOutput:
     """Simple container for environment outputs that SyncMultiTurnRollout expects."""
-    done: bool = False
+    truncated: bool = False
+    terminated: bool = False
     state: str = ""
     reward: float = 0.0
     info: Dict[str, Any] = None  # type: ignore
@@ -19,7 +21,7 @@ class EnvOutput:
             self.info = {}
 
 @dataclass
-class Trajectory:
+class SingleTurnTrajectory:
     """Simple trajectory class for storing a single step's information."""
     state: str = ""
     actions_left: int = 0
@@ -28,6 +30,31 @@ class Trajectory:
     info: Dict[str, Any] = field(default_factory=dict)
     llm_response: str = ""
     llm_raw_response: str = ""
+
+@dataclass
+class MultiTurnTrajectory:
+    """Trajectory class for storing multiple turns' information."""
+    trajectories: deque = field(default_factory=lambda: deque(maxlen=5))
+    max_length: int = 5
+    
+    def __post_init__(self):
+        self.trajectories = deque(self.trajectories, maxlen=self.max_length)
+    
+    def add(self, trajectory: SingleTurnTrajectory) -> None:
+        """Add a new trajectory to the deque."""
+        self.trajectories.append(trajectory)
+    
+    def get(self) -> deque:
+        """Get the trajectory at the specified index."""
+        return self.trajectories
+    
+    def __len__(self) -> int:
+        """Return the number of trajectories."""
+        return len(self.trajectories)
+
+    def clear(self) -> None:
+        """Clear all trajectories."""
+        self.trajectories.clear()
 
 @contextmanager
 def all_seed(seed):

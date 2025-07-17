@@ -240,7 +240,7 @@ class SyncMultiTurnRollout:
             
             # Update tracking structures
             self.env_outs[idx] = env_out
-            self.done_mask[idx] = env_out.done
+            self.done_mask[idx] = env_out.truncated or env_out.terminated
         
         return updated_env_outs
 
