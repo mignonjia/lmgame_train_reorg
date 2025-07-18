@@ -307,7 +307,7 @@ class SokobanAgent(BaseAgent):
         if self.cur_turn >= self.max_turns or self.total_actions_consumed >= self.max_actions_all_turns:
             done = True
         
-        self.update_trajectory_history(
+        self.trajectory_history.add(SingleTurnTrajectory(
             state=obs,
             actions_left=actions_left,
             actions=executed_actions,
@@ -315,7 +315,7 @@ class SokobanAgent(BaseAgent):
             info=info,
             llm_response=processed_llm_response,
             llm_raw_response=llm_raw_response
-        )
+        ))
         
         return EnvOutput(
             truncated=done,
@@ -378,22 +378,6 @@ class SokobanAgent(BaseAgent):
         }
         
         return row_dict
-
-    # ─────────────────── TRAJECTORY MANAGEMENT ───────────────────
-    def update_trajectory_history(self, state: str, actions_left: int, actions: List[int], 
-                                 reward: float, info: Dict[str, Any], llm_response: str, llm_raw_response: str):
-        """Update agent's trajectory history."""
-        self.trajectory_history.add(SingleTurnTrajectory(
-            state=state,
-            actions_left=actions_left,
-            actions=actions,
-            reward=reward,
-            info=info,
-            llm_response=llm_response,
-            llm_raw_response=llm_raw_response
-        ))
-        
-        return self.trajectory_history
     
     # ─────────────────── LIFECYCLE MANAGEMENT ───────────────────
     def reset(self, seed=None):
