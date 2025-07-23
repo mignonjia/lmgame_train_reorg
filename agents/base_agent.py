@@ -29,10 +29,6 @@ class BaseAgent:
         """Get final rollout states for training or evaluation."""
         pass
 
-    def update_trajectory_history(self, state: str, actions_left: int, actions: List[int], 
-                                 reward: float, info: Dict[str, Any], llm_response: str, llm_raw_response: str):
-        """Update the agent's trajectory history."""
-        pass
 
     def reset(self, seed=None):
         """Reset agent state for a new episode and return initial environment outputs."""
