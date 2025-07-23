@@ -11,8 +11,8 @@ system:
 
 # ------ Rollout Configuration ------
 rollout:
-  agent_group_num: 8
-  agent_group_size: 16 # number of agents = agent_group_num * agent_group_size
+  agent_group_num: 4
+  agent_group_size: 1 # number of agents = agent_group_num * agent_group_size
   train: [sokobanAgent]
   validation: [sokobanAgent]
   truncation: left  # truncate from left (oldest tokens) to keep recent context

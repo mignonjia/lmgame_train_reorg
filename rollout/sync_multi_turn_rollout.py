@@ -301,9 +301,6 @@ class SyncMultiTurnRollout:
             
             self.step_cnt += 1
         
-        final_batch_prompts = self.get_batch_llm_prompts(self.env_outs)
-
-        return final_batch_prompts
 
     # ─────────────────── PPO BATCH BUILDING ───────────────────
 
