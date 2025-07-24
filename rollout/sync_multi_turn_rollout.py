@@ -490,12 +490,6 @@ class SyncMultiTurnRollout:
             
             llm_input_texts.append(prompt_text)
         
-        # Debug printout of llm_input_texts
-        print("[DEBUG] llm_input_texts:")
-        for i, text in enumerate(llm_input_texts):
-            print(f"Agent {i}: {repr(text)}")
-        print("="*80)
-        
         inputs = self.tokenizer(llm_input_texts, return_tensors="pt", padding=True, padding_side="left", truncation=False) # do not truncate here. Process later at TODO
         input_ids, attention_mask = inputs.input_ids, inputs.attention_mask
         position_ids = attention_mask.cumsum(dim=-1)
