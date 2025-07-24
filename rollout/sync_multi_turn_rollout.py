@@ -468,8 +468,9 @@ class SyncMultiTurnRollout:
                 llm_input_texts.append("")
                 continue
             
-            # Get messages from agent's get_llm_prompts method
-            messages = agent.get_llm_prompts(env_out)
+            # Get messages from agent's get_messages method
+            messages = agent.get_messages()
+   
 
             # NOTE: this assertion is important for loss mask computation
             assert all(msg["role"] == "assistant" for msg in messages[2::2])
@@ -481,7 +482,7 @@ class SyncMultiTurnRollout:
                 prompt_text = self.tokenizer.apply_chat_template(
                     messages, 
                     tokenize=False, 
-                    add_generation_prompt=True
+                    add_generation_prompt=False
                 )
             except Exception as e:
                 # Fallback in case of chat template error
@@ -489,14 +490,17 @@ class SyncMultiTurnRollout:
             
             llm_input_texts.append(prompt_text)
         
-        # When prepare for update, we do not add the state from the n+1 turn
-        if 'state' in rollout_states[-1]['history'][-1]:
-            rollout_states[-1]['history'] = rollout_states[-1]['history'][:-1]
+        # Debug printout of llm_input_texts
+        print("[DEBUG] llm_input_texts:")
+        for i, text in enumerate(llm_input_texts):
+            print(f"Agent {i}: {repr(text)}")
+        print("="*80)
         
         inputs = self.tokenizer(llm_input_texts, return_tensors="pt", padding=True, padding_side="left", truncation=False) # do not truncate here. Process later at TODO
         input_ids, attention_mask = inputs.input_ids, inputs.attention_mask
         position_ids = attention_mask.cumsum(dim=-1)
         scores = [[i['reward'] for i in env_output['history']] for env_output in rollout_states]
+        
         loss_mask, score_tensor, response_mask = self.get_masks_and_scores(input_ids, scores, use_turn_scores=self.cfg.rollout.use_turn_scores)
         normalized_score_tensor = self._normalize_score_tensor(score_tensor, rollout_states)
         response_length = response_mask.sum(dim=-1).float().mean().item()

@@ -143,10 +143,14 @@ class SokobanAgent(BaseAgent):
             max_tokens=self.max_tokens
         )
         turn_msg = {"role": "user", "content": turn_content}
-        if self.cur_turn > 0:
+
+        # In the first turn, we merge the turn_content into the prompt
+        if self.cur_turn == 0 and len(self.messages) == 2 and self.messages[1]["role"] == "user":
+            self.messages[1]["content"] = self.messages[1]["content"] + "\n" + turn_content
+        else:
             reward_msg = f"Reward: {env_out.reward}"
             turn_msg["content"] =  reward_msg + " " + turn_msg["content"]
-        self.messages.append(turn_msg)
+            self.messages.append(turn_msg)
         
         # Validate final messages before returning
         if not self.messages:
@@ -155,14 +159,6 @@ class SokobanAgent(BaseAgent):
                 {"role": "system", "content": "You are a helpful AI assistant."},
                 {"role": "user", "content": "Please respond appropriately."}
             ]
-
-        # Ad hoc fix for the messages format - merge Message 2 and Message 3 if both are USER - for future loss mask computation
-        if len(self.messages) >= 3 and self.messages[1]["role"] == "user" and self.messages[2]["role"] == "user":
-            # Merge Message 2 and Message 3 content
-            merged_content = self.messages[1]["content"] + "\n" + self.messages[2]["content"]
-            self.messages[1]["content"] = merged_content
-            # Remove Message 3
-            self.messages.pop(2)
         
         return self.messages
 
@@ -378,6 +374,10 @@ class SokobanAgent(BaseAgent):
         }
         
         return row_dict
+
+    def get_messages(self):
+        """Get messages for debugging."""
+        return self.messages
     
     # ─────────────────── LIFECYCLE MANAGEMENT ───────────────────
     def reset(self, seed=None):

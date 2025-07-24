@@ -454,8 +454,8 @@ class AgentTrainer(RayPPOTrainer):
         env_metric_dict = {}
         for step in range(self.config.trainer.validation_steps):
             # MODIFICATION: Use agent_group_num * agent_group_size for total validation agents
-            agent_group_num = self.config.rollout.agent_group_num
-            agent_group_size = self.config.rollout.agent_group_size
+            agent_group_num = self.config.rollout.validation_agent_group_num
+            agent_group_size = self.config.rollout.validation_agent_group_size
             total_validation_agents = agent_group_num * agent_group_size
             
             input_texts = ["" for _ in range(total_validation_agents)]

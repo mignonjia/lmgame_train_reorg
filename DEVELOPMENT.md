@@ -4,7 +4,7 @@
 
 ### 1. Performance Reproduction
 - **Qwen 2.5-0.5B Sokoban PPO Training** ✅ **Completed** (yuxuan)
-- **Qwen 2.5-7B Sokoban PPO Training** ✅ **In Progress** (mingjia)
+- **Qwen 2.5-7B Sokoban PPO Training** ✅ **Completed** (mingjia)
 
 ## Development Roadmap
 
@@ -12,18 +12,18 @@
 
 #### 2.1 Core Agent System
 **Location:** `agents/sokobanAgent/`
-- [ ] Handle ad-hoc message format fixes in `get_llm_prompts()` function
-- [ ] Abstract base agent class for reusability
+- [✅] Handle ad-hoc message format fixes in `get_llm_prompts()` function
+- [✅] Abstract base agent class for reusability
 
 #### 2.2 Rollout System
 **Location:** `rollout/sync_multi_turn_rollout.py`
-- [ ] Debug early stop logic in multi-turn rollout
-- [ ] Optimize reward computation (loss_mask, reward_mask mechanisms)
+- [✅] Debug early stop logic in multi-turn rollout
+- [✅] Optimize reward computation (loss_mask, reward_mask mechanisms)
 - [ ] Replace `tokenizer.encode()` with `verl_F.tokenize_and_postprocess_data()`
 
 #### 2.3 Training System
 **Location:** `trainer/agent_trainer.py`
-- [ ] Add hyperparameter for validation agent number
+- [✅] Add hyperparameter for validation agent number
 - [ ] Debug `_validate()` function against mingjia's ragen implementation
 - [ ] Add extra metrics and LLM generation logging to wandb
 
