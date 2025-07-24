@@ -8,7 +8,7 @@ sokobanAgent:
     max_turns: 6
     max_actions_per_turn: 5
     max_actions_all_turns: 10
-    format_penalty: 0.1
+    format_penalty: -0.1
     action_separator: "||"
 
   env_config:

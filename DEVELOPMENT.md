@@ -24,7 +24,8 @@
 #### 2.3 Training System
 **Location:** `trainer/agent_trainer.py`
 - [✅] Add hyperparameter for validation agent number
-- [ ] Debug `_validate()` function against mingjia's ragen implementation
+- [✅] Debug `_validate()` function against mingjia's ragen implementation
+- [ ] Checkpoint saving frequency settings
 - [ ] Add extra metrics and LLM generation logging to wandb
 
 #### 2.4 Installation & Build
