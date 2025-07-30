@@ -26,7 +26,7 @@
 - [✅] Add hyperparameter for validation agent number
 - [✅] Debug `_validate()` function against mingjia's ragen implementation
 - [ ] Checkpoint saving frequency settings
-- [ ] Add extra metrics and LLM generation logging to wandb
+- [ ] Add extra metrics and LLM generation logging to wandb and fix is_action_valid metric issue
 
 #### 2.4 Installation & Build
 - [ ] Implement uv installation for faster package management
