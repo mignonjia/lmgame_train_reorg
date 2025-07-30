@@ -1,8 +1,84 @@
 # AgentTrainer: Multi-Turn PPO Training
 
-## Overview
+# System Design — LMGame Multi‑Turn PPO Training
 
-`AgentTrainer` inherits from `RayPPOTrainer` and replaces single-turn generation with multi-turn rollout logic using our `SyncMultiTurnRollout` class. The implementation is complete and functional with agent-based multi-turn interactions.
+This document describes the high‑level design of the training stack, with emphasis on the **multi‑turn rollout** path introduced by `AgentTrainer` and `SyncMultiTurnRollout`.
+
+> Key idea: swap the single‑turn generation with a **synchronous multi‑turn rollout**, while leaving reward/advantage estimation and PPO updates unchanged.
+
+---
+
+## Architecture Overview
+
+```mermaid
+%%{init: {'securityLevel':'loose','flowchart':{'htmlLabels':true}}}%%
+flowchart TB
+
+subgraph Init ["Initialize"]
+  direction TB
+  A["Config & launch"]
+  B["AgentTrainer (inherits RayPPOTrainer)"]
+  C["Init workers & rollout mgr"]
+  A --> B --> C
+end
+
+%% Entry into your rollout
+C --> R0
+
+subgraph R ["SyncMultiTurnRollout"]
+  direction TB
+  R0["Launch agents<br/>(groups x size)"]
+  R1["Env -> agent loop (per agent)"]
+  R2["Formulate LLM prompts"]
+  R3["Batch -> inference<br/>_generate_sequences"]
+  R4["Env step · update trajectories · track status"]
+  R4 -->|until done| R1
+  R5["Collect final rollout states"]
+  R6["Build PPO batch<br/>(loss mask · response mask)"]
+
+  R0 --> R1 --> R2 --> R3 --> R4 --> R5 --> R6
+end
+
+subgraph PPO ["PPO update"]
+  direction TB
+  P1["Compute advantages"]
+  P2["Policy / value update"]
+  P3["Sync weights / validation"]
+  P1 --> P2 --> P3
+end
+
+R6 --> P1
+P3 --> R0
+
+```
+
+**Rollout Output Sample:**
+
+Message 1: [SYSTEM]
+    Content: ''You are a helpful AI assistant that solves Sokoban puzzles step by step.''
+    Length: 72 chars
+    ----------------------------------------
+
+  Message 2: [USER]
+    Content: '"You are solving the Sokoban puzzle. You are the player and you need to push all boxes to targets. When you are right next to a box, you can push it by moving in the same direction. You cannot push a box through a wall, and you cannot pull a box. The answer should be a sequence of actions, like <answer>Right || Right || Up</answer>.\nThe meaning of each symbol in the state is:\n #: wall, _: empty, O: target, √: box on target, X: box, P: player, S: player on target\nYour available actions are:\nUp, Down, Left, Right\nYou can make up to 10 actions, and each action is separated by '||'.\nTurn 1:\nState:\n######\n######\n##_O##\n##_XP#\n##___#\n######\nYou have 10 actions remaining. Always output: <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: 100 tokens.\n"'
+    Length: 836 chars
+    ----------------------------------------
+
+  Message 3: [ASSISTANT]
+    Content: ''<think>To push all boxes to targets X, I need to locate the boxes first. I can do that by exploring the grid. The target would be the last move I made. I need to follow the grid to find the boxes.</think><answer>Up | Right | Down</answer>''
+    Length: 238 chars
+    ----------------------------------------
+
+  Message 4: [USER]
+    Content: ''Reward: 0 Turn 2:\nState:\n######\n######\n##_O##\n##_XP#\n##___#\n######\nYou have 10 actions remaining. Always output: <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: 100 tokens.\n''
+    Length: 261 chars
+    ----------------------------------------
+
+  Message 5: [ASSISTANT]
+    Content: '"<think>Exploring the grid, I find a target. I can push it using the Up action. I now need to find the box on the target. I can't directly see it but can check if I can push it in the Up direction. I will use the Right action to move closer, and Check action to see if the box is in the right place.</think><answer>Right | Right | Right | Right | Right | | Check | Right | Check | Right |</answer>"'
+    Length: 396 chars
+    ----------------------------------------
+
 
 ## Key Design Decisions
 
@@ -58,21 +134,6 @@ def _validate(self):
 # Original: batch = self.actor_rollout_wg.generate_sequences(gen_batch)
 # Modified: batch, rollout_metrics = self._generate_multi_turn_sequences(gen_batch)
 # ─────────────────── END MODIFICATION ───────────────────
-```
-
-### 4. Integration Architecture
-
-```
-┌─────────────────┐    ┌──────────────────────┐    ┌─────────────────────┐
-│   PPO Trainer   │───▶│   AgentTrainer      │───▶│ SyncMultiTurnRollout│
-│   (Standard)    │    │   (Multi-turn)      │    │   (Agent Manager)   │
-└─────────────────┘    └──────────────────────┘    └─────────────────────┘
-                                │                              │
-                                ▼                              ▼
-                       ┌──────────────────────┐    ┌─────────────────────┐
-                       │ _generate_multi_turn │    │  Agent[0..N]       │
-                       │    _sequences()      │    │ (SokobanAgent etc.) │
-                       └──────────────────────┘    └─────────────────────┘
 ```
 
 ## Implementation Status ✅
@@ -151,53 +212,145 @@ The config should contain everything needed for:
 2. **Multi-turn rollout**: Agent configuration parameters
 3. **Agent-specific settings**: Environment templates, max turns, etc.
 
-Example config structure:
+Example base config structure:
 ```yaml
-# Standard PPO config
-trainer:
-  total_epochs: 10
-  validation_steps: 10
-  
-algorithm:
-  adv_estimator: "gae"
+# Base configuration for PPO training with Sokoban agents
+# This configuration follows the hydra structure with defaults and overrides
+# ------ Hydra Config ------
 
-# Rollout config
+defaults:
+  - agents
+  - ppo_trainer
+
+system:
+  CUDA_VISIBLE_DEVICES: 0
+
+# ------ Rollout Configuration ------
 rollout:
-  train: ["sokobanAgent"]  # Agent to train
-  agent_group_num: 2       # Number of agent groups
-  agent_group_size: 2      # Agents per group
-  use_turn_scores: false
+  agent_group_num: 8
+  agent_group_size: 16 # number of agents = agent_group_num * agent_group_size
+  validation_agent_group_num: 16
+  validation_agent_group_size: 16
+  train: [sokobanAgent]
+  validation: [sokobanAgent]
+  truncation: left  # truncate from left (oldest tokens) to keep recent context
+  use_turn_scores: False  # for GAE computation
+  rollout_filter_ratio: 0.25  # filter ratio for rollout selection
+  rollout_filter_type: std  # std or std_rev for filtering criteria
   reward_normalization:
-    grouping: "batch"
-    method: "identity"
-  rollout_filter_ratio: 1.0
-  
-# Agent-specific config
+    grouping: "state" # state / batch / inductive
+    method: "identity" # asym_clip / identity / mean_std
+
+# ------ Training Parameters ------
+train_batch_size: 128
+micro_batch_size_per_gpu: 4
+ppo_micro_batch_size_per_gpu: 4
+ppo_mini_batch_size: 32
+total_training_steps: 200
+n_gpus_per_node: 1
+max_prompt_length: 4096
+max_response_length: 400
+test_freq: 10
+model_path: Qwen/Qwen2.5-0.5B-Instruct
+project_name: lmgame
+experiment_name: sokoban_train_example
+
+# ------ PPO_trainer Override Config ------
+actor_rollout_ref:
+  model:
+    path: ${model_path}
+  actor:
+    ppo_mini_batch_size: ${ppo_mini_batch_size}  # by default, ppo_mini_batch_size = train_batch_size / 4
+    micro_batch_size_per_gpu: ${micro_batch_size_per_gpu} # following micro_batch_size_per_gpu
+    ppo_micro_batch_size_per_gpu: ${micro_batch_size_per_gpu} # following micro_batch_size_per_gpu
+    use_ref: True
+    entropy_coeff: 0.001
+    # use_kl_loss: False
+    kl_loss_coef: 0.001
+    kl_loss_type: kl
+    clip_ratio_low: 0.2
+    clip_ratio_high: 0.28
+    optim:
+      betas: [0.9, 0.999]
+  ref:
+    log_prob_micro_batch_size_per_gpu: ${micro_batch_size_per_gpu} # following micro_batch_size_per_gpu
+  rollout:
+    log_prob_micro_batch_size_per_gpu: ${micro_batch_size_per_gpu} # following micro_batch_size_per_gpu
+    tensor_model_parallel_size: 1
+    max_model_len: 20000
+    prompt_length: 1 # useless. Just put it here
+    response_length: 400 # single-turn response length
+    gpu_memory_utilization: 0.5
+    max_num_batched_tokens: 20000 # set only when enable_chunked_prefill is true
+    temperature: 1
+    rollout_filter_ratio: 0.25
+    rollout_filter_type: std # max_mean or std
+    enforce_eager: True
+    free_cache_engine: True
+    val_kwargs:
+      do_sample: False
+      temperature: 0
+
+critic:
+  ppo_mini_batch_size: ${ppo_mini_batch_size} # by default, ppo_mini_batch_size = train_batch_size / 4
+  ppo_micro_batch_size_per_gpu: ${micro_batch_size_per_gpu} # following micro_batch_size_per_gpu
+  model:
+    path: ${model_path}
+  optim:
+    betas: [0.9, 0.999]
+
+data:
+  max_prompt_length: ${max_prompt_length}
+  max_response_length: ${max_response_length}
+  train_batch_size: ${train_batch_size}
+
+algorithm:
+  gamma: 1.0
+  lam: 1.0
+  adv_estimator: gae
+  kl_penalty: kl  # how to estimate kl divergence
+  use_kl_in_reward: True
+  kl_ctrl:
+    type: fixed
+    kl_coef: 0.001
+
+trainer:
+  project_name: lmgame
+  experiment_name: sokoban_train_example
+  total_training_steps: ${total_training_steps}
+  validation_steps: 1 # validation instances = validation_steps * val_env_groups * group_size
+  val_before_train: True
+  n_gpus_per_node: ${n_gpus_per_node}
+  test_freq: ${test_freq}
+  logger: [ 'console', 'wandb' ] # 
+  val_only: False
+```
+Example agent config structure:
+```yaml
+# ------ Sokoban Agent & Env Configs ------
 sokobanAgent:
   agent_config:
-    max_turns: 5
-    max_actions_all_turns: 10
+    system_prompt: "You are a helpful AI assistant that solves Sokoban puzzles step by step."
+    prompt: "You are solving the Sokoban puzzle. You are the player and you need to push all boxes to targets. When you are right next to a box, you can push it by moving in the same direction. You cannot push a box through a wall, and you cannot pull a box. The answer should be a sequence of actions, like <answer>Right || Right || Up</answer>."
+    max_tokens: 100 # used to curate llm prompt "max words", not used for rollout
+    enable_think: True  # enable thinking before answering
+    max_turns: 6
     max_actions_per_turn: 5
-    max_tokens: 100
-    format_penalty: 0.0
-    enable_think: true
+    max_actions_all_turns: 10
+    format_penalty: -0.1
     action_separator: "||"
-    system_prompt: "You are a helpful AI assistant that solves Sokoban puzzles."
-    prompt: "You are solving the Sokoban puzzle."
-  env_config:
-    # Environment-specific configuration
-    grid_vocab:
-      "@": "player"
-      "#": "wall"
-      "$": "box"
-      ".": "target"
-    action_lookup:
-      0: "up"
-      1: "down"
-      2: "left"
-      3: "right"
-```
 
+  env_config:
+    dim_room: [6, 6]
+    num_boxes: 1
+    max_steps: 100
+    search_depth: 100  # Reduced from 300 to make simpler puzzles
+    grid_lookup: {0: "#", 1: "_", 2: "O", 3: "√", 4: "X", 5: "P", 6: "S"}
+    grid_vocab: {"#": "wall", "_": "empty", "O": "target", "√": "box on target", "X": "box", "P": "player", "S": "player on target"}
+    action_lookup: {1: "Up", 2: "Down", 3: "Left", 4: "Right"}
+    render_mode: "text"
+
+```
 ## Usage Example
 
 ```python
