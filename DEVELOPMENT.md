@@ -31,8 +31,8 @@
 - [ ] Add extra metrics and LLM generation logging to wandb
 
 #### 2.3 Align with Paper Report Data
-- [ ] Correct unstable validation curve
-- [ ] Test general ability from simpleSokoban to largeSokoban 
+- [✅] Correct unstable validation curve
+- [✅] Test general ability from simpleSokoban to largeSokoban 
 - [ ] Integrate more envs: 
 - [ ] Test general ability through all envs
 
