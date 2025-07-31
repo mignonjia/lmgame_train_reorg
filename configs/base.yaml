@@ -17,6 +17,7 @@ rollout:
   validation_agent_group_size: [1, 1]
   training: [simpleSokobanAgent]
   validation: [simpleSokobanAgent, largeSokobanAgent]
+  validation_seed: 123
   truncation: left  # truncate from left (oldest tokens) to keep recent context
   use_turn_scores: False  # for GAE computation
   rollout_filter_ratio: 0.25  # filter ratio for rollout selection

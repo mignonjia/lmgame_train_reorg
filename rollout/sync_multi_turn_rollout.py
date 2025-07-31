@@ -576,7 +576,7 @@ class SyncMultiTurnRollout:
         if seed is not None:
             base_seed = seed
         elif self.validation:
-            base_seed = 123
+            base_seed = self.cfg.rollout.validation_seed
         else:# Generate random seed for training, consistent seed for validation  
             base_seed = random.randint(0, 1000000)
             
