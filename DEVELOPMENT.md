@@ -25,10 +25,20 @@
 **Location:** `trainer/agent_trainer.py`
 - [✅] Add hyperparameter for validation agent number
 - [✅] Debug `_validate()` function against mingjia's ragen implementation
-- [ ] Checkpoint saving frequency settings
+- [✅] Checkpoint saving frequency settings
 - [ ] Add extra metrics and LLM generation logging to wandb and fix is_action_valid metric issue
 
-#### 2.4 Installation & Build
+#### 2.3 Align with Paper Report Data
+- [ ] Correct unstable validation curve
+- [ ] Test general ability from simpleSokoban to largeSokoban 
+- [ ] Integrate more envs: 
+- [ ] Test general ability through all envs
+
+#### 2.5 System Deisgn for Different Trainers
+- [ ] Jax PPO trainer integration
+- [ ] Abstract the framework to integrate different trainers
+
+#### 2.6 Installation & Build
 - [ ] Implement uv installation for faster package management
 - [ ] Create pyproject.toml to package as `lmgame_train`
 

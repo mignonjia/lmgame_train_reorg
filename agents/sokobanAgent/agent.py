@@ -352,7 +352,7 @@ class SokobanAgent(BaseAgent):
         else:
             metrics[f'{self.tag or "sokobanAgent"}/action_is_effective'] = 0.0
         
-        action_is_valid_values = [traj.info.get('action_is_valid', True) for traj in trajectory_deque]
+        action_is_valid_values = [traj.info.get('action_is_valid', False) for traj in trajectory_deque]
         if action_is_valid_values:
             metrics[f'{self.tag or "sokobanAgent"}/action_is_valid'] = sum(action_is_valid_values) / len(action_is_valid_values)
         else:
