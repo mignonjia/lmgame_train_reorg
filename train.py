@@ -102,7 +102,7 @@ class DummyRewardManager():
 
 @hydra.main(config_path="configs", config_name="ppo_trainer", version_base=None)
 def main(config):
-
+    
     run_ppo(config)
 
 
