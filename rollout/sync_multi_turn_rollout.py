@@ -22,7 +22,7 @@ class SyncMultiTurnRollout:
     """
 
     # ─────────────────── INITIALIZATION ───────────────────
-    def __init__(self, actor_rollout_wg, cfg, tokenizer, processor):
+    def __init__(self, actor_rollout_wg, cfg, tokenizer, processor, validation=False):
         """
         Initialize rollout manager. Agent class is resolved from config.
         
@@ -38,12 +38,20 @@ class SyncMultiTurnRollout:
         self.actor_wg = actor_rollout_wg
         
         # Calculate total agents from agent_group_num * agent_group_size
-        agent_group_num = getattr(cfg.rollout, "agent_group_num", 1)
-        agent_group_size = getattr(cfg.rollout, "agent_group_size", 1)
-        self.n_agents = agent_group_num * agent_group_size
-        self.agent_group_num = agent_group_num
-        self.agent_group_size = agent_group_size
-        
+        if validation:
+            self.agent_group_num_list = getattr(cfg.rollout, "validation_agent_group_num", [64])
+            self.agent_group_size_list = getattr(cfg.rollout, "validation_agent_group_size", [1])
+        else:
+            self.agent_group_num_list = getattr(cfg.rollout, "agent_group_num", [4])
+            self.agent_group_size_list = getattr(cfg.rollout, "agent_group_size", [2])
+            
+        self.n_agents_list = [agent_group_num * agent_group_size for agent_group_num, agent_group_size in zip(self.agent_group_num_list, self.agent_group_size_list)]
+        self.total_group_num = sum(self.agent_group_num_list)
+        self.total_agent_num = sum(self.n_agents_list)
+        self.validation = validation
+
+
+
         # Initialize agent configuration from config
         self._setup_agent_config()
         self._init_batch_agents()
@@ -57,18 +65,26 @@ class SyncMultiTurnRollout:
         Agent class is resolved from config and agent config is extracted.
         """
         # Get agent name from rollout config train list (first item)
-        train_agents = getattr(self.cfg.rollout, 'train', ['sokobanAgent'])
-        agent_name = train_agents[0] if train_agents else 'sokobanAgent'
+        if self.validation:
+            self.agent_names = getattr(self.cfg.rollout, 'validation', ['simpleSokobanAgent'])
+        else:
+            self.agent_names = getattr(self.cfg.rollout, 'training', ['simpleSokobanAgent'])
         
-        # Resolve agent class from registry
-        self.agent_cls = get_agent_cls(agent_name)
+        self.agent_cls_list = []
+        self.agent_config_list = []
+        self.max_turns_list = []
+        for agent_name in self.agent_names:
+            agent_type = self.cfg[agent_name]['agent_type']
+
+            # Resolve agent class from registry
+            self.agent_cls_list.append(get_agent_cls(agent_type))
+
+            self.agent_config_list.append(self.cfg[agent_name])
+            self.max_turns_list.append(self.cfg[agent_name]['agent_config'].get('max_turns', 5))
         
-        # Extract agent configuration from agents.yaml format
-        # The config should contain the agent configuration under the agent name
-        self.agent_config = self.cfg[agent_name]
         
         # Get max_turns from agent config
-        self.max_turns = self.agent_config['agent_config'].get('max_turns', 5)
+        self.max_turns = max(self.max_turns_list)
 
     def _init_batch_agents(self):
         """
@@ -78,29 +94,41 @@ class SyncMultiTurnRollout:
         Actual reset happens in rollout() via _reset_batch_agents().
         """
         # Create agents of the same type
-        if self.agent_cls is None:
-            raise ValueError("agent_cls is None but trying to create agents")
+        if len(self.agent_cls_list) == 0:
+            raise ValueError("agent_cls_list is None but trying to create agents")
         
         # Verify the math
-        if self.n_agents != self.agent_group_num * self.agent_group_size:
-            raise ValueError(f"Total agents ({self.n_agents}) != agent_group_num ({self.agent_group_num}) × agent_group_size ({self.agent_group_size})")
-        
+        for i, agent_num in enumerate(self.n_agents_list):
+            if agent_num != self.agent_group_num_list[i] * self.agent_group_size_list[i]:
+                raise ValueError(f"Total agents ({agent_num}) != agent_group_num ({self.agent_group_num_list[i]}) × agent_group_size ({self.agent_group_size_list[i]})")
+
         self.agents = []
-        
-        for idx in range(self.n_agents):
-            group_id = idx // self.agent_group_size
-            
-            # Create agent with the extracted agent configuration
-            agent = self.agent_cls(
-                config=self.agent_config,
-                agent_id=idx,
-                group_id=group_id
-            )
-            
-            self.agents.append(agent)
+        done_groups = 0
+        agent_id_counter = 0
+
+        # loop through all agent types
+        for i, agent_cls in enumerate(self.agent_cls_list):
+            group_num = self.agent_group_num_list[i]
+            group_size = self.agent_group_size_list[i]
+            cfg = self.agent_config_list[i]
+            name = self.agent_names[i]
+            # loop through all groups of the same agent type
+            for local_group_id in range(group_num):
+                global_group_id = local_group_id + done_groups
+                # loop through group_size to initialize agents
+                for _ in range(group_size):
+                    agent = agent_cls(
+                        config=cfg,
+                        agent_id=agent_id_counter,
+                        group_id=global_group_id,
+                        tag=name)
+                    agent_id_counter += 1
+                    self.agents.append(agent)
+            # update the done_groups for the next agent type
+            done_groups += self.agent_group_num_list[i]
         
         # Initialize tracking structures - actual env_outs will be set in rollout()
-        self.done_mask = torch.zeros(self.n_agents, dtype=torch.bool)
+        self.done_mask = torch.zeros(self.total_agent_num, dtype=torch.bool)
         self.env_outs = None  # Will be initialized in _reset_batch_agents()
 
     # ─────────────────── BATCH LLM PROMPTS ───────────────────
@@ -134,7 +162,7 @@ class SyncMultiTurnRollout:
             except Exception as e:
                 prompt_str = "System error in chat template"
 
-            if self.agent_config.get('enable_think', True):
+            if agent.agent_config.get('enable_think', True):
                 prompt_str += "<think>"
             else:
                 prompt_str += "<answer>"
@@ -277,7 +305,7 @@ class SyncMultiTurnRollout:
         return lm_outputs
 
     # ─────────────────── MAIN ROLLOUT LOOP ───────────────────
-    def rollout(self) -> DataProto:
+    def rollout(self):
         """
         Main rollout loop using batch LLM prompts approach.
         Iterate cfg.agent.max_turn turns, breaking early if all done.
@@ -297,7 +325,6 @@ class SyncMultiTurnRollout:
             # Process LLM outputs and update environment outputs
             self.env_outs = self.get_batch_env_outputs(lm_outputs)
 
-            # TODO: Early stopping. If max_actions_all_turns is reached or env is done, break.
             
             self.step_cnt += 1
         
@@ -395,7 +422,9 @@ class SyncMultiTurnRollout:
         Filter rollout batch based on the filter ratio.
         """
         rollout_filter_ratio = self.cfg.rollout.rollout_filter_ratio
-        num_groups, group_size = self.agent_group_num, self.agent_group_size
+
+        # ad hoc set the agent_group_num and agent_group_size, assuming only one type of agent in training
+        num_groups, group_size = self.agent_group_num_list[0], self.agent_group_size_list[0]
         
         rm_scores = rollout_batch.batch["rm_scores"].sum(dim=-1).view(num_groups, group_size)
         
@@ -444,7 +473,7 @@ class SyncMultiTurnRollout:
             List[Dict]: List of rollout state dictionaries from all agents
         """
         env_outputs = []
-        for idx in range(self.n_agents):
+        for idx in range(self.total_agent_num):
             agent = self.agents[idx]
             rollout_state = agent.get_final_rollout_states()
             env_outputs.append(rollout_state)
@@ -516,13 +545,14 @@ class SyncMultiTurnRollout:
         }
 
         metrics = {}
+        n_agents_map = dict(zip(self.agent_names, self.n_agents_list))
         for env_output in rollout_states:
             for key, value in env_output["metrics"].items():
                 if key not in metrics:
                         metrics[key] = []
                 metrics[key].append(value)
         metrics = {
-            key: np.sum(value) / (self.agent_group_num * self.agent_group_size)
+            key: np.sum(value) / n_agents_map[key.split("/")[0]]
             for key, value in metrics.items()
         }
         metrics["response_length"] = response_length
@@ -551,23 +581,22 @@ class SyncMultiTurnRollout:
             
         # Generate group seeds: agents within same group share environment
         # Different groups get different environments
-        group_seeds = [base_seed + group_id for group_id in range(self.agent_group_num)]
+        group_seeds = [base_seed + group_id for group_id in range(self.total_group_num)]
         
         initial_env_outs = []
         
-        for idx in range(self.n_agents):
+        for idx in range(self.total_agent_num):
             agent = self.agents[idx]
-            group_id = idx // self.agent_group_size
             
             # All agents in the same group use the same seed (same environment)
-            group_seed = group_seeds[group_id]
+            group_seed = group_seeds[agent.group_id]
             
             # Reset agent with group-specific seed
             initial_env_out = agent.reset(seed=group_seed)
             initial_env_outs.append(initial_env_out)
         
         # Update tracking structures with batch of reset outputs
-        self.done_mask = torch.zeros(self.n_agents, dtype=torch.bool)
+        self.done_mask = torch.zeros(self.total_agent_num, dtype=torch.bool)
         self.env_outs = initial_env_outs
         self.step_cnt = 0
         
@@ -585,7 +614,7 @@ class SyncMultiTurnRollout:
         """
         Clean up agents and environments for tidy teardown.
         """
-        for idx in range(self.n_agents):
+        for idx in range(self.total_agent_num):
             agent = self.agents[idx]
             if hasattr(agent, 'close'):
                 agent.close()

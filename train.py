@@ -99,10 +99,22 @@ class DummyRewardManager():
             return reward_tensor
 # ─────────────────── END MODIFICATION ───────────────────
 
+# ─────────────────── MODIFICATION: Check config ───────────────────
+def check_config(config):
+    if len(config.rollout.validation_agent_group_num) != len(config.rollout.validation_agent_group_size):
+        raise ValueError("validation_agent_group_num and validation_agent_group_size must have the same length")
+    if len(config.rollout.validation) != len(config.rollout.validation_agent_group_num):
+        raise ValueError("validation and validation_agent_group_num must have the same length")
+    if len(config.rollout.agent_group_num) != len(config.rollout.agent_group_size):
+        raise ValueError("agent_group_num and agent_group_size must have the same length")
+    if len(config.rollout.training) != len(config.rollout.agent_group_num):
+        raise ValueError("training and agent_group_num must have the same length")
+# ─────────────────── END MODIFICATION ───────────────────
 
 @hydra.main(config_path="configs", config_name="ppo_trainer", version_base=None)
 def main(config):
-    
+
+    check_config(config)
     run_ppo(config)
 
 
@@ -266,7 +278,7 @@ class TaskRunner:
         trainer.init_workers()
         # Start the training process.
         trainer.fit()
-
+    
 
 # ─────────────────── MODIFICATION: Remove dataset creation functions - using None datasets instead ───────────────────
 # def create_rl_dataset(...) - REMOVED

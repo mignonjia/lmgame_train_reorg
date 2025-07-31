@@ -61,6 +61,7 @@ class AgentTrainer(RayPPOTrainer):
         
         # Initialize multi-turn rollout manager (will be created after init_workers)
         self.multi_turn_rollout = None
+        self.validation_multi_turn_rollout = None
 
     def _create_dataloader(self, train_dataset, val_dataset, collate_fn, train_sampler):
         """
@@ -125,6 +126,14 @@ class AgentTrainer(RayPPOTrainer):
             processor=self.processor
         )
 
+        self.validation_multi_turn_rollout = SyncMultiTurnRollout(
+            actor_rollout_wg=self.actor_rollout_wg,
+            cfg=self.config,
+            tokenizer=self.tokenizer,
+            processor=self.processor,
+            validation=True
+        )
+
 
     # ─────────────────── MODIFICATION: Multi-turn rollout generation replaces single-turn generation ───────────────────
     def _generate_multi_turn_sequences(self, gen_batch: DataProto) -> tuple[DataProto, dict]:
@@ -138,7 +147,7 @@ class AgentTrainer(RayPPOTrainer):
             tuple: (rollout_batch: DataProto, filter_metrics: dict)
         """
         # Initialize multi-turn rollout if not already done
-        if self.multi_turn_rollout is None:
+        if self.multi_turn_rollout is None or self.validation_multi_turn_rollout is None:
             self.init_multi_turn_rollout()
         
         # Type narrowing assertion - we know it's not None after initialization
@@ -450,13 +459,14 @@ class AgentTrainer(RayPPOTrainer):
         sample_outputs = []
         sample_scores = []
 
+        # Initialize multi-turn rollout if not already done
+        if self.multi_turn_rollout is None or self.validation_multi_turn_rollout is None:
+            self.init_multi_turn_rollout()
+
         # MODIFICATION: Use rollout-based validation config instead of val_dataloader
         env_metric_dict = {}
         for step in range(self.config.trainer.validation_steps):
-            # MODIFICATION: Use agent_group_num * agent_group_size for total validation agents
-            agent_group_num = self.config.rollout.validation_agent_group_num
-            agent_group_size = self.config.rollout.validation_agent_group_size
-            total_validation_agents = agent_group_num * agent_group_size
+            total_validation_agents = self.validation_multi_turn_rollout.total_agent_num
             
             input_texts = ["" for _ in range(total_validation_agents)]
             sample_inputs.extend(input_texts)
@@ -473,17 +483,13 @@ class AgentTrainer(RayPPOTrainer):
             # MODIFICATION: Use multi-turn rollout with rollout() + build_ppo_batch()
             start_time = time.time()
             
-            # Initialize multi-turn rollout if not already done
-            if self.multi_turn_rollout is None:
-                self.init_multi_turn_rollout()
-            
             # Type narrowing assertion - we know it's not None after initialization  
-            assert self.multi_turn_rollout is not None, "multi_turn_rollout should be initialized"
+            assert self.validation_multi_turn_rollout is not None, "multi_turn_rollout should be initialized"
             
             # MODIFICATION: Call rollout() first, then build_ppo_batch() 
-            self.multi_turn_rollout.rollout()
-            rollout_states = self.multi_turn_rollout._collect_final_rollout_states()
-            test_batch = self.multi_turn_rollout.build_ppo_batch(rollout_states)
+            self.validation_multi_turn_rollout.rollout()
+            rollout_states = self.validation_multi_turn_rollout._collect_final_rollout_states()
+            test_batch = self.validation_multi_turn_rollout.build_ppo_batch(rollout_states)
             
             end_time = time.time()
             
