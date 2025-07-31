@@ -573,11 +573,12 @@ class SyncMultiTurnRollout:
         import random
         
         # Generate base seed following reference implementation pattern
-        if seed is None:
-            # Generate random seed for training, consistent seed for validation  
-            base_seed = random.randint(0, 1000000)
-        else:
+        if seed is not None:
             base_seed = seed
+        elif self.validation:
+            base_seed = 123
+        else:# Generate random seed for training, consistent seed for validation  
+            base_seed = random.randint(0, 1000000)
             
         # Generate group seeds: agents within same group share environment
         # Different groups get different environments
