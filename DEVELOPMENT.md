@@ -26,7 +26,9 @@
 - [✅] Add hyperparameter for validation agent number
 - [✅] Debug `_validate()` function against mingjia's ragen implementation
 - [✅] Checkpoint saving frequency settings
-- [ ] Add extra metrics and LLM generation logging to wandb and fix is_action_valid metric issue
+- [✅] fix is_action_valid metric issue
+- [ ] integrate turn-based on loss mask
+- [ ] Add extra metrics and LLM generation logging to wandb
 
 #### 2.3 Align with Paper Report Data
 - [ ] Correct unstable validation curve
