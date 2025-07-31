@@ -27,7 +27,7 @@
 - [✅] Debug `_validate()` function against mingjia's ragen implementation
 - [✅] Checkpoint saving frequency settings
 - [✅] fix is_action_valid metric issue
-- [ ] integrate turn-based on loss mask
+- [ ] integrate turn-based loss mask
 - [ ] Add extra metrics and LLM generation logging to wandb
 
 #### 2.3 Align with Paper Report Data
