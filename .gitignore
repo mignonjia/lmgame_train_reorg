@@ -134,6 +134,8 @@ run_logs/
 
 cache/
 
+.triton_cache_
+
 cache_example/
 
 setup_log.txt
