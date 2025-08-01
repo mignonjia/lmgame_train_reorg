@@ -14,6 +14,7 @@
 **Location:** `agents/sokobanAgent/`
 - [✅] Handle ad-hoc message format fixes in `get_llm_prompts()` function
 - [✅] Abstract base agent class for reusability
+- [ ] move common parts `base_agent.py` and simplify other specific agents
 
 #### 2.2 Rollout System
 **Location:** `rollout/sync_multi_turn_rollout.py`

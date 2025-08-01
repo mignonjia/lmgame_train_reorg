@@ -1,6 +1,6 @@
 from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass
-
+import random
 class BaseAgent:
     """
     Abstract base class for agents. Provides high-level method signatures for agent lifecycle, environment interaction, LLM interface, trajectory management, and rollout collection.
