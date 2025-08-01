@@ -1,7 +1,4 @@
 # sync_multi_turn_rollout.py
-# TODO: 1. Debug early stop logic in the multi-turn rollout (Be careful with the done_mask and llm_input_texts in build_ppo_batch)
-# TODO: 2. Reward Computation like loss_mask, reward_mask, etc. Maybe there is a better way to do this.(research mechansim)
-# TODO: 3. Optimize function calls like self.tokenizer.encode(). We can replace it with verl_F.tokenize_and_postprocess_data(verl implemented functions)
 from typing import List, Dict, Any, Union
 import torch
 from verl import DataProto

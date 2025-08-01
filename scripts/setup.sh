@@ -112,6 +112,16 @@ install_verl() {
     print_success "verl installed in editable mode"
 }
 
+install_webshop() {
+    print_step "Installing webshop-minimal..."
+    # pulls in Flask & friends via the “full” extra if it’s defined
+    pip install -e external/webshop-minimal[full]
+    # or, if extras aren’t defined, fall back to its own requirements file
+    pip install -r external/webshop-minimal/requirements.txt
+    print_success "webshop-minimal installed (editable)"
+}
+
+
 # Install torch first (required for flash-attn)
 install_torch() {
     print_step "Installing torch 2.7.0..."
@@ -306,6 +316,7 @@ main() {
     check_prerequisites
     setup_submodules
     install_verl
+    install_webshop
     install_torch
     install_flash_attn
     install_requirements
