@@ -2,7 +2,7 @@
 
 ## Current Development Status
 
-### 1. Performance Reproduction
+### 1. Previous PPO Training Sanity Check
 - **Qwen 2.5-0.5B Sokoban PPO Training** ✅ **Completed** (yuxuan)
 - **Qwen 2.5-7B Sokoban PPO Training** ✅ **Completed** (mingjia)
 
