@@ -33,7 +33,10 @@
 #### 2.3 Align with Paper Report Data
 - [✅] Correct unstable validation curve
 - [✅] Test general ability from simpleSokoban to largeSokoban 
-- [ ] Integrate more envs: 
+- [ ] Integrate more envs
+    - [ ] Integrate Agentic Webshop env
+    - [ ] Integrate Tetris env
+
 - [ ] Test general ability through all envs
 
 #### 2.5 System Deisgn for Different Trainers
@@ -43,6 +46,7 @@
 #### 2.6 Installation & Build
 - [ ] Implement uv installation for faster package management
 - [ ] Create pyproject.toml to package as `lmgame_train`
+- [ ] Convert env_setup.sh into a open and useful script
 
 ### 3. Feature Development
 
