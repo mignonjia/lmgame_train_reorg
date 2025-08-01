@@ -223,6 +223,17 @@ verify_installation() {
     fi
 }
 
+verify_submodule() {
+    local path="$1"
+    if [[ -d "$path" && $(ls -A "$path") ]]; then
+        print_success "$path submodule downloaded"
+    else
+        print_error "Missing or empty submodule: $path"
+        exit 1
+    fi
+}
+
+
 # Check and setup authentication
 setup_authentication() {
     print_step "Setting up authentication..."
@@ -301,6 +312,8 @@ main() {
     install_package
     verify_installation
     setup_authentication
+    verify_submodule verl
+    verify_submodule external/webshop-minimal
     
     echo "=========================================="
     echo -e "${GREEN}Setup completed successfully!${NC}"
