@@ -53,7 +53,7 @@ gsm8kAgent_single_turn:
   agent_config:
     system_prompt: "You are a helpful AI assistant that solves GSM8K puzzles step by step."
     prompt: "You are solving Math problems. Let's think step by step. You should put all thinking process into <think>...</think> and then only give the final answer in <answer>...</answer>."
-    enable_think: True  # enable thinking before answering
+    enable_think: False  # enable thinking before answering
     max_tokens: 100 # used to curate llm prompt "max words", not used for rollout
     max_turns: 1
     max_actions_per_turn: 1
@@ -71,7 +71,7 @@ gsm8kAgent_5_turn:
   agent_config:
     system_prompt: "You are a helpful AI assistant that solves GSM8K puzzles step by step."
     prompt: "You are solving Math problems. Let's think step by step. You should put all thinking process into <think>...</think> and then only give the final answer in <answer>...</answer>."
-    enable_think: True  # enable thinking before answering
+    enable_think: False  # enable thinking before answering
     max_tokens: 100 # used to curate llm prompt "max words", not used for rollout
     max_turns: 6
     max_actions_per_turn: 1
