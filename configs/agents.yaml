@@ -4,8 +4,8 @@ simpleSokobanAgent:
   agent_config:
     system_prompt: "You are a helpful AI assistant that solves Sokoban puzzles step by step."
     prompt: "You are solving the Sokoban puzzle. You are the player and you need to push all boxes to targets. When you are right next to a box, you can push it by moving in the same direction. You cannot push a box through a wall, and you cannot pull a box. The answer should be a sequence of actions, like <answer>Right || Right || Up</answer>."
-    max_tokens: 100 # used to curate llm prompt "max words", not used for rollout
     enable_think: True  # enable thinking before answering
+    max_tokens: 100 # used to curate llm prompt "max words", not used for rollout
     max_turns: 6
     max_actions_per_turn: 5
     max_actions_all_turns: 10
@@ -27,8 +27,8 @@ largeSokobanAgent:
   agent_config:
     system_prompt: "You are a helpful AI assistant that solves Sokoban puzzles step by step."
     prompt: "You are solving the Sokoban puzzle. You are the player and you need to push all boxes to targets. When you are right next to a box, you can push it by moving in the same direction. You cannot push a box through a wall, and you cannot pull a box. The answer should be a sequence of actions, like <answer>Right || Right || Up</answer>."
-    max_tokens: 100 # used to curate llm prompt "max words", not used for rollout
     enable_think: True  # enable thinking before answering
+    max_tokens: 100 # used to curate llm prompt "max words", not used for rollout
     max_turns: 6
     max_actions_per_turn: 5
     max_actions_all_turns: 10
@@ -52,6 +52,7 @@ gsm8kAgent_single_turn:
     system_prompt: "You are a helpful AI assistant that solves GSM8K puzzles step by step."
     prompt: "You are solving Math problems. Let's think step by step. You should put all thinking process into <think>...</think> and then only give the final answer in <answer>...</answer>."
     enable_think: True  # enable thinking before answering
+    max_tokens: 100 # used to curate llm prompt "max words", not used for rollout
     max_turns: 1
     max_actions_per_turn: 1
     max_actions_all_turns: 1
@@ -68,6 +69,7 @@ gsm8kAgent_5_turn:
     system_prompt: "You are a helpful AI assistant that solves GSM8K puzzles step by step."
     prompt: "You are solving Math problems. Let's think step by step. You should put all thinking process into <think>...</think> and then only give the final answer in <answer>...</answer>."
     enable_think: True  # enable thinking before answering
+    max_tokens: 100 # used to curate llm prompt "max words", not used for rollout
     max_turns: 5
     max_actions_per_turn: 1
     max_actions_all_turns: 5
@@ -79,6 +81,25 @@ gsm8kAgent_5_turn:
     split: "train"
 
 
+# ------ Blocksworld Agent & Env Configs ------
+blocksworldAgent:
+  agent_type: "blocksworldAgent"
+  agent_config:
+    system_prompt: "You are a helpful AI assistant that solves Blocksworld puzzles step by step."
+    prompt:  "You are solving blocksworld problems. There are 3 blocks: block 1, block 2, and block 3. You can only move a block if there is no other block on top of it. Each action should be formatted as:\"move X to Y\", where X is the block number you're moving, and Y is either 0, meaning move the block to the table; or another block number, meaning move it on top of that block. You are given the current state and the goal state, and you need to find a sequence of actions to move the blocks to the goal state. The answer should be a sequence of actions, like <answer>(move 2 to 0) || (move 1 to 2)</answer>"
+    enable_think: True  # enable thinking before answering
+    max_tokens: 100 # used to curate llm prompt "max words", not used for rollout
+    max_turns: 10
+    max_actions_per_turn: 5
+    max_actions_all_turns: 20
+    format_penalty: -0.1
+    action_separator: "||"
+
+  env_config:
+    num_blocks: 3
+    max_steps: 100
+    render_mode: "text"
+  
 
 
 # ------ Webshop Agent & Env Configs ------

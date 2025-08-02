@@ -10,8 +10,8 @@ system:
 rollout:
   agent_group_num: [8]
   agent_group_size: [16] # number of agents = agent_group_num * agent_group_size
-  validation_agent_group_num: [256, 256, 256]
-  validation_agent_group_size: [1, 1, 1]
+  validation_agent_group_num: [256, 256, 256, 256]
+  validation_agent_group_size: [1, 1, 1, 1]
   training: [simpleSokobanAgent]
   validation: [simpleSokobanAgent, largeSokobanAgent, gsm8kAgent_single_turn, gsm8kAgent_5_turn]
   validation_seed: 123

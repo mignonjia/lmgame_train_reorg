@@ -19,6 +19,12 @@ class GSM8KAgent(BaseAgent):
     def __init__(self, config, group_id=0, agent_id=0, seed=None, tag=None):
         super().__init__(config, group_id, agent_id, seed, tag)
         self.initialize_env()
+
+        if self.enable_think:
+            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\n Always output: <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
+        else:
+            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\n Always output: <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
+
     
 
     def initialize_env(self):
@@ -45,7 +51,6 @@ class GSM8KAgent(BaseAgent):
         obs = self.env.render()
         total_reward = 0
         done = False
-        executed_actions = []
         info = {}  # Initialize info dictionary
 
         if len(actions) != 0:
