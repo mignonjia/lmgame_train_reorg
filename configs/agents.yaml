@@ -46,7 +46,7 @@ largeSokobanAgent:
     render_mode: "text"
 
 # ------ GSM8K Agent & Env Configs ------
-gsm8kAgent:
+gsm8kAgent_single_turn:
   agent_type: "gsm8kAgent"
   agent_config:
     system_prompt: "You are a helpful AI assistant that solves GSM8K puzzles step by step."
@@ -57,6 +57,22 @@ gsm8kAgent:
     max_actions_all_turns: 1
     format_penalty: -0.1
     
+  env_config:
+    dataset_path: "openai/gsm8k"
+    max_steps: 5
+    split: "train"
+
+gsm8kAgent_5_turn:
+  agent_type: "gsm8kAgent"
+  agent_config:
+    system_prompt: "You are a helpful AI assistant that solves GSM8K puzzles step by step."
+    prompt: "You are solving Math problems. Let's think step by step. You should put all thinking process into <think>...</think> and then only give the final answer in <answer>...</answer>."
+    enable_think: True  # enable thinking before answering
+    max_turns: 5
+    max_actions_per_turn: 1
+    max_actions_all_turns: 5
+    format_penalty: -0.1
+  
   env_config:
     dataset_path: "openai/gsm8k"
     max_steps: 5

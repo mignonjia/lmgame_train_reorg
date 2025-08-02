@@ -13,7 +13,7 @@ rollout:
   validation_agent_group_num: [256, 256, 256]
   validation_agent_group_size: [1, 1, 1]
   training: [simpleSokobanAgent]
-  validation: [simpleSokobanAgent, largeSokobanAgent, gsm8kAgent]
+  validation: [simpleSokobanAgent, largeSokobanAgent, gsm8kAgent_single_turn, gsm8kAgent_5_turn]
   validation_seed: 123
   truncation: left  # truncate from left (oldest tokens) to keep recent context
   use_turn_scores: False  # for GAE computation
