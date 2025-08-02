@@ -11,6 +11,7 @@ simpleSokobanAgent:
     max_actions_all_turns: 10
     format_penalty: -0.1
     action_separator: "||"
+    use_action: True
 
   env_config:
     dim_room: [6, 6]
@@ -34,6 +35,7 @@ largeSokobanAgent:
     max_actions_all_turns: 10
     format_penalty: -0.1
     action_separator: "||"
+    use_action: True
 
   env_config:
     dim_room: [8, 8]
@@ -57,6 +59,7 @@ gsm8kAgent_single_turn:
     max_actions_per_turn: 1
     max_actions_all_turns: 1
     format_penalty: -0.1
+    use_action: False
     
   env_config:
     dataset_path: "openai/gsm8k"
@@ -70,10 +73,11 @@ gsm8kAgent_5_turn:
     prompt: "You are solving Math problems. Let's think step by step. You should put all thinking process into <think>...</think> and then only give the final answer in <answer>...</answer>."
     enable_think: True  # enable thinking before answering
     max_tokens: 100 # used to curate llm prompt "max words", not used for rollout
-    max_turns: 5
+    max_turns: 6
     max_actions_per_turn: 1
-    max_actions_all_turns: 5
+    max_actions_all_turns: 6
     format_penalty: -0.1
+    use_action: False
   
   env_config:
     dataset_path: "openai/gsm8k"
@@ -94,6 +98,7 @@ blocksworldAgent:
     max_actions_all_turns: 20
     format_penalty: -0.1
     action_separator: "||"
+    use_action: True
 
   env_config:
     num_blocks: 3
