@@ -14,7 +14,7 @@ echo "Logging all outputs to: $LOG_FILE"
 # ------ Run Training with Logging ------
 # Redirect both stdout and stderr to log file, while also displaying on console
 # verl may ignore this cuda_visible_devices in base.yaml so we explicitly set it here
-export CUDA_VISIBLE_DEVICES=0
-python train.py --config-name "custom_qwen_half_b_train" 2>&1 | tee "$LOG_FILE"
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+python train.py --config-name "custom_qwen_7b_train" 2>&1 | tee "$LOG_FILE"
 
 echo "Training completed. Full log available at: $LOG_FILE" 

@@ -4,16 +4,16 @@ defaults:
   - base
 
 system:
-  CUDA_VISIBLE_DEVICES: 0
+  CUDA_VISIBLE_DEVICES: 0,1,2,3
 
 # ------ Rollout Configuration ------
 rollout:
   agent_group_num: [8]
   agent_group_size: [16] # number of agents = agent_group_num * agent_group_size
-  validation_agent_group_num: [256, 256]
-  validation_agent_group_size: [1, 1]
+  validation_agent_group_num: [256, 256, 256]
+  validation_agent_group_size: [1, 1, 1]
   training: [simpleSokobanAgent]
-  validation: [simpleSokobanAgent, largeSokobanAgent]
+  validation: [simpleSokobanAgent, largeSokobanAgent, gsm8kAgent]
   validation_seed: 123
   truncation: left  # truncate from left (oldest tokens) to keep recent context
   use_turn_scores: False  # for GAE computation
@@ -29,11 +29,11 @@ micro_batch_size_per_gpu: 4
 ppo_micro_batch_size_per_gpu: 4
 ppo_mini_batch_size: 32
 total_training_steps: 200
-n_gpus_per_node: 1
+n_gpus_per_node: 4
 max_prompt_length: 4096
 max_response_length: 400
 test_freq: 10
 save_freq: 200
-model_path: Qwen/Qwen2.5-0.5B-Instruct
-project_name: lmgame
-experiment_name: sokoban_train_example
+model_path: Qwen/Qwen2.5-7B-Instruct
+project_name: lmgame_train
+experiment_name: qwen_7b_think_sokoban
