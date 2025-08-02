@@ -30,11 +30,19 @@ class BaseAgent:
         self.system_prompt = self.agent_config.get('system_prompt', "You are a helpful AI assistant.")
         self.prompt = self.agent_config.get('prompt', "Please respond appropriately.")
         self.action_separator = self.agent_config.get('action_separator', "||")
+        self.use_action = self.agent_config.get('use_action', True)
 
+        # Define turn prompt template based on enable_think
         if self.enable_think:
-            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {actions_remaining} actions remaining. Always output: <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
+            if self.use_action:
+                self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {actions_remaining} actions remaining. Always output: <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
+            else:
+                self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nAlways output: <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
         else:
-            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {actions_remaining} actions remaining. Always output: <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
+            if self.use_action:
+                self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {actions_remaining} actions remaining. Always output: <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
+            else:
+                self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nAlways output: <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
 
         self.trajectory_history = MultiTurnTrajectory(max_length=self.max_turns)
         self.raw_response_list = []  # Store all raw LLM responses for debugging
@@ -59,12 +67,19 @@ class BaseAgent:
         # Calculate actions remaining based on max_actions_all_turns
         actions_remaining = max(0, self.max_actions_all_turns - self.total_actions_consumed)
         
-        turn_content = self.turn_prompt_template.format(
-            turn_number=self.cur_turn + 1,
-            state=env_out.state,
-            actions_remaining=actions_remaining,
-            max_tokens=self.max_tokens
-        )
+        if self.use_action:
+            turn_content = self.turn_prompt_template.format(
+                turn_number=self.cur_turn + 1,
+                state=env_out.state,
+                actions_remaining=actions_remaining,
+                max_tokens=self.max_tokens
+            )
+        else:
+            turn_content = self.turn_prompt_template.format(
+                turn_number=self.cur_turn + 1,
+                state=env_out.state,
+                max_tokens=self.max_tokens
+            )
         turn_msg = {"role": "user", "content": turn_content}
 
         # In the first turn, we merge the turn_content into the prompt
