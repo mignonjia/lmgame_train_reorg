@@ -162,7 +162,7 @@ class SokobanAgent(BaseAgent):
         
         return self.messages
 
-    def parse_model_response(self, llm_response, enable_think=True):
+    def parse_llm_response(self, llm_response, enable_think=True):
         """
         Parse model response into processed llm_response and action list.
         Simple parsing that handles enable_think cases and limits actions to max_actions_per_turn.
@@ -225,7 +225,7 @@ class SokobanAgent(BaseAgent):
        
         self.cur_turn += 1
 
-        processed_llm_response, actions = self.parse_model_response(llm_raw_response, enable_think=self.enable_think)
+        processed_llm_response, actions = self.parse_llm_response(llm_raw_response, enable_think=self.enable_think)
 
         self.messages.append({"role": "assistant", "content": processed_llm_response})
 
