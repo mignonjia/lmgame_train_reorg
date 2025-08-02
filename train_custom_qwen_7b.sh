@@ -6,9 +6,9 @@ mkdir -p cache
 
 # Generate timestamp for log file
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="cache/train_custom_qwen_half_b_${TIMESTAMP}.log"
+LOG_FILE="cache/train_custom_qwen_7b_${TIMESTAMP}.log"
 
-echo "Starting training with custom_qwen_half_b configuration..."
+echo "Starting training with custom_qwen_7b_b configuration..."
 echo "Logging all outputs to: $LOG_FILE"
 
 # ------ Run Training with Logging ------
