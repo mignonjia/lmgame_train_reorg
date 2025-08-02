@@ -8,7 +8,7 @@ from agents.base_agent import BaseAgent
 from agents.gsm8kAgent.env import GSM8KEnv
 from agents import register_agent
 
-# ─────────────────── SOKOBAN AGENT ───────────────────
+# ─────────────────── GSM8K AGENT ───────────────────
 @register_agent("gsm8kAgent")
 class GSM8KAgent(BaseAgent):
     """

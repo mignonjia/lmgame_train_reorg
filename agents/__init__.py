@@ -50,3 +50,4 @@ def list_registered_agents() -> list:
 # Import agents to trigger registration
 from agents.sokobanAgent.agent import SokobanAgent 
 from agents.gsm8kAgent.agent import GSM8KAgent
+from agents.blocksworldAgent.agent import BlocksworldAgent
