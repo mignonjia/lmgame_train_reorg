@@ -1,7 +1,7 @@
 defaults:
-  - base
-  - agents
   - ppo_trainer
+  - agents
+  - base
 
 system:
   CUDA_VISIBLE_DEVICES: 0
