@@ -15,7 +15,6 @@ rollout:
   training: [simpleSokobanAgent]
   validation: [simpleSokobanAgent, largeSokobanAgent, gsm8kAgent_single_turn, gsm8kAgent_5_turn, blocksworldAgent_text, blocksworldAgent_1d, blocksworldAgent_2d_sparse]
   validation_seed: 123
-  validation_seed: 123
   truncation: left  # truncate from left (oldest tokens) to keep recent context
   use_turn_scores: False  # for GAE computation
   rollout_filter_ratio: 0.25  # filter ratio for rollout selection
