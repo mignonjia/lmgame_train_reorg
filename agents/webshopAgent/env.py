@@ -15,8 +15,9 @@ import string
 from webshop_minimal.utils import (
     DEFAULT_FILE_PATH,
 )
+from agents.base_env import BaseEnv
 
-class WebShopEnv(WebAgentTextEnv):
+class WebShopEnv(WebAgentTextEnv, BaseEnv):
     def __init__(self, config, **kwargs: any) -> None:
         """
         Adapter for WebAgentTextEnv to conform to the BaseLanguageBasedEnv interface.

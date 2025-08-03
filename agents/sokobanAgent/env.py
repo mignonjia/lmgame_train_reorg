@@ -3,8 +3,9 @@ from gym_sokoban.envs.sokoban_env import SokobanEnv as GymSokobanEnv
 import numpy as np
 from agents.agent_utils import all_seed
 from .utils import generate_room
+from agents.base_env import BaseEnv
 
-class SokobanEnv(GymSokobanEnv):
+class SokobanEnv(GymSokobanEnv, BaseEnv):
     def __init__(self, config, **kwargs):
         self.config = config
         self.GRID_LOOKUP = self.config.get('grid_lookup', {0: "#", 1: "_", 2: "O", 3: "√", 4: "X", 5: "P", 6: "S"})

@@ -8,8 +8,9 @@ import re
 import os
 from collections import defaultdict
 from pathlib import Path   
+from agents.base_env import BaseEnv
 
-class BlocksworldEnv():
+class BlocksworldEnv(BaseEnv):
     metadata = {'render.modes': ['human', 'ansi']}
     
     def __init__(self, config, **kwargs):

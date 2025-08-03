@@ -2,9 +2,9 @@ from datasets import load_dataset
 import re
 import random
 from agents.agent_utils import all_seed
+from agents.base_env import BaseEnv
 
-
-class GSM8KEnv():
+class GSM8KEnv(BaseEnv):
     def __init__(self, config, **kwargs):
         super(GSM8KEnv, self).__init__()
         

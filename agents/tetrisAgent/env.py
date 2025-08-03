@@ -4,6 +4,7 @@ from typing import Tuple, Dict, Any, List
 import gym
 import copy
 from agents.agent_utils import all_seed
+from agents.base_env import BaseEnv
 
 def is_occupied(shape, anchor, board):
     for i, j in shape:
@@ -14,7 +15,7 @@ def is_occupied(shape, anchor, board):
             return True
     return False
 
-class TetrisEnv():
+class TetrisEnv(BaseEnv):
     """
     A Tetris environment that follows the BaseDiscreteActionEnv interface.
     The environment has a 8x8 grid and supports basic Tetris mechanics.
