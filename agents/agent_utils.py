@@ -69,3 +69,23 @@ def all_seed(seed):
     finally:
         random.setstate(random_state)
         np.random.set_state(np_random_state)
+
+def debug_printout_in_env_output(messages, actions):
+    print("="*40)
+    print("DEBUG: Messages and Actions")
+    print("="*40)
+    
+    print("Messages:")
+    for i, message in enumerate(messages):
+        if isinstance(message, dict):
+            role = message.get('role', 'unknown')
+            content = message.get('content', '')
+            print(f"  [{i}] {role}: {repr(content)}")
+        else:
+            print(f"  [{i}] {repr(message)}")
+    
+    print("\nActions:")
+    for i, action in enumerate(actions):
+        print(f"  [{i}] {action}")
+    
+    print("="*40)

@@ -3,7 +3,7 @@ import random
 import yaml
 from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass
-from agents.agent_utils import SingleTurnTrajectory, MultiTurnTrajectory, EnvOutput
+from agents.agent_utils import SingleTurnTrajectory, MultiTurnTrajectory, EnvOutput, debug_printout_in_env_output
 from agents.base_agent import BaseAgent
 from agents.blocksworldAgent.env import BlocksworldEnv
 from agents import register_agent
@@ -79,6 +79,9 @@ class BlocksworldAgent(BaseAgent):
             llm_response=processed_llm_response,
             llm_raw_response=llm_raw_response
         ))
+
+        # debug_printout_in_env_output(self.messages, actions)
+
 
         return EnvOutput(
             truncated=done,

@@ -35,9 +35,10 @@
 - [✅] Correct unstable validation curve
 - [✅] Test general ability from simpleSokoban to largeSokoban 
 - [ ] Integrate more envs
-    - [ ] Integrate gsm8k & blocksworld
+    - [✅] Integrate gsm8k & blocksworld
+    - [✅] Integrate Tetris env
+    - [ ] Align Env Parameters and Message Printout
     - [ ] Integrate Agentic Webshop env
-    - [ ] Integrate Tetris env
 
 - [ ] Test general ability through all envs
 

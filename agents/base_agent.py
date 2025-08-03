@@ -259,9 +259,6 @@ class BaseAgent:
         """Initialize the environment for the agent."""
         pass
 
-    def parse_model_response(self, llm_response, enable_think=True):
-        """Parse model response into processed response and action list."""
-        pass
 
     def get_env_outputs(self, llm_response):
         """Process LLM outputs and get environment outputs."""
