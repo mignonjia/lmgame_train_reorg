@@ -23,14 +23,15 @@ class WebShopEnv(WebAgentTextEnv, BaseEnv):
         Adapter for WebAgentTextEnv to conform to the BaseLanguageBasedEnv interface.
         """
         self.config = config
-        self.observation_mode = self.config.observation_mode
-        self.file_path = self.config.file_path
-        self.server = self.config.server
-        self.filter_goals = DEFAULT_FILE_PATH
-        self.limit_goals = self.config.limit_goals
-        self.num_products = self.config.num_products
-        self.human_goals = self.config.human_goals
-        self.show_attrs = self.config.show_attrs
+        self.observation_mode = self.config.get('observation_mode', 'text')
+        self.file_path = DEFAULT_FILE_PATH
+        self.server = self.config.get('server', None)
+        self.filter_goals = self.config.get('filter_goals', None)
+        self.limit_goals = self.config.get('limit_goals', -1)
+        self.num_products = self.config.get('num_products', None)
+        self.human_goals = self.config.get('human_goals', False)
+        self.show_attrs = self.config.get('show_attrs', False)
+        self.dataset_size = self.config.get('dataset_size', 'small')
         self.render_cache = None
 
         WebAgentTextEnv.__init__(
@@ -43,6 +44,7 @@ class WebShopEnv(WebAgentTextEnv, BaseEnv):
             num_products=self.num_products,
             human_goals=self.human_goals,
             show_attrs=self.show_attrs,
+            dataset_size=self.dataset_size,
             **kwargs
         )
 

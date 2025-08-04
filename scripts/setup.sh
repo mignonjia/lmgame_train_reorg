@@ -3,7 +3,12 @@
 # Setup script for lmgame_train_reorg
 # Assumes you're already in the lmgame_train conda environment
 
-set -e  # Exit on error
+set -euo pipefail
+IFS=$'\n\t'
+
+# Install webshop-minimal
+INSTALL_WEBSHOP=${INSTALL_WEBSHOP:-0}   # export INSTALL_WEBSHOP=1 to enable
+
 
 # Setup logging
 LOG_FILE="setup_log.txt"
@@ -39,6 +44,10 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Detect CUDA (works on bare metal or inside a container)
+have_cuda() { command -v nvidia-smi &>/dev/null; }
+
+
 # Check prerequisites
 check_prerequisites() {
     print_step "Checking prerequisites..."
@@ -65,6 +74,13 @@ check_prerequisites() {
     if ! command_exists git; then
         print_error "git is required but not installed"
         exit 1
+    fi
+
+    # Check CUDA
+    if have_cuda; then
+        print_success "CUDA detected"
+    else
+        print_warning "CUDA not detected"
     fi
     
     print_success "Prerequisites check passed"
@@ -112,14 +128,60 @@ install_verl() {
     print_success "verl installed in editable mode"
 }
 
-install_webshop() {
-    print_step "Installing webshop-minimal..."
-    # pulls in Flask & friends via the “full” extra if it’s defined
-    pip install -e external/webshop-minimal[full]
-    # or, if extras aren’t defined, fall back to its own requirements file
-    pip install -r external/webshop-minimal/requirements.txt
-    print_success "webshop-minimal installed (editable)"
+# ── extra deps for WebShop / Pyserini ─────────────────────────────────────
+install_webshop_prereqs() {
+    print_step "Installing WebShop prerequisites (faiss, JDK, Maven)"
+
+    # FAISS (CPU) – use conda-forge only, skip Anaconda main channel
+    conda install -y --override-channels -c conda-forge faiss-cpu
+
+    # Fresh SQLite (≥3.45) so Python’s _sqlite3 extension finds all symbols
+    conda install -y --override-channels -c conda-forge 'sqlite>=3.45'
+
+    # JDK & Maven – pick conda if available, else apt
+    if ! command -v javac &>/dev/null; then
+        print_step "JDK not found – installing OpenJDK 21 + Maven"
+        if command -v conda &>/dev/null; then
+            conda install -y --override-channels -c conda-forge openjdk=21 maven
+        else
+            sudo apt update
+            sudo apt install -y default-jdk maven
+        fi
+    else
+        print_step "JDK already present: $(javac -version 2>&1)"
+    fi
+
+    # Export JAVA_HOME for this session so jnius can find it
+    export JAVA_HOME="${JAVA_HOME:-$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")}"
+    export PATH="$JAVA_HOME/bin:$PATH"
+    print_success "JAVA_HOME set to: $JAVA_HOME"
 }
+
+
+install_webshop() {
+    install_webshop_prereqs
+    print_step "Installing WebShop-minimal (may take a few minutes)…"
+
+    # Ensure the submodule exists
+    if [[ ! -d external/webshop-minimal ]]; then
+        print_warning "WebShop submodule not found; skipping"
+        return
+    fi
+
+    # Editable install with all extras if defined
+    if pip install -e 'external/webshop-minimal[full]' 2>/dev/null; then
+        print_success "webshop-minimal installed (editable, full extras)"
+    else
+        # Fallback: plain editable + its own requirements.txt
+        pip install -e external/webshop-minimal
+        pip install -r external/webshop-minimal/requirements.txt
+        print_success "webshop-minimal installed (editable, basic deps)"
+    fi
+
+    python -m spacy download en_core_web_sm
+    python -m spacy download en_core_web_lg
+}
+
 
 
 # Install torch first (required for flash-attn)
@@ -262,10 +324,10 @@ setup_authentication() {
     
     # Hugging Face login
     print_step "Checking Hugging Face authentication..."
-    if [ -n "$HF_TOKEN" ]; then
+    if [ -n "${HF_TOKEN:-}" ]; then
         print_success "HF_TOKEN found in environment"
         print_step "Logging into Hugging Face..."
-        if huggingface-cli login --token "$HF_TOKEN" >/dev/null 2>&1; then
+        if huggingface-cli login --token "${HF_TOKEN:-}" >/dev/null 2>&1; then
             print_success "Hugging Face login successful"
         else
             print_warning "Hugging Face login failed, but continuing..."
@@ -277,10 +339,10 @@ setup_authentication() {
     
     # Weights & Biases login
     print_step "Checking Weights & Biases authentication..."
-    if [ -n "$WANDB_API_KEY" ]; then
+    if [ -n "${WANDB_API_KEY:-}" ]; then
         print_success "WANDB_API_KEY found in environment"
         print_step "Logging into Weights & Biases..."
-        if wandb login --relogin "$WANDB_API_KEY" >/dev/null 2>&1; then
+        if wandb login --relogin "${WANDB_API_KEY:-}" >/dev/null 2>&1; then
             print_success "Weights & Biases login successful"
         else
             print_warning "Weights & Biases login failed, but continuing..."
@@ -291,8 +353,8 @@ setup_authentication() {
     fi
     
     # Set WANDB team/organization
-    if [ -n "$WANDB_ENTITY" ]; then
-        print_success "WANDB_ENTITY found: $WANDB_ENTITY"
+    if [ -n "${WANDB_ENTITY:-}" ]; then
+        print_success "WANDB_ENTITY found: ${WANDB_ENTITY:-}"
     else
         print_warning "WANDB_ENTITY not found in environment"
         echo "   To set WANDB_ENTITY: export WANDB_ENTITY=your_wandb_org_name"
@@ -316,7 +378,11 @@ main() {
     check_prerequisites
     setup_submodules
     install_verl
-    install_webshop
+    if [[ "$INSTALL_WEBSHOP" == 1 ]]; then
+        install_webshop
+    else
+        print_warning "Skipping WebShop install (set INSTALL_WEBSHOP=1 to enable)"
+    fi
     install_torch
     install_flash_attn
     install_requirements
@@ -336,6 +402,9 @@ main() {
     echo "  python train.py"
     echo ""
     echo "Current environment: $CONDA_DEFAULT_ENV"
+    # ─── end-of-script hint (just before final echo lines) ─────────────────
+    echo "Tip: run  INSTALL_WEBSHOP=1 ./setup.sh  if you later need WebShop support"
+
 }
 
 # Run main function
