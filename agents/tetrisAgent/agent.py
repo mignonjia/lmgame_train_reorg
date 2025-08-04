@@ -139,7 +139,7 @@ class TetrisAgent(BaseAgent):
             llm_raw_response=llm_raw_response
         ))
 
-        # debug_printout_in_env_output(self.messages, executed_actions)
+        # debug_printout_in_env_output(self.messages, executed_actions, self.tag)
         
         return EnvOutput(
             truncated=done,

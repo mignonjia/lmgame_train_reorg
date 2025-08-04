@@ -30,20 +30,13 @@ class BaseAgent:
         self.system_prompt = self.agent_config.get('system_prompt', "You are a helpful AI assistant.")
         self.prompt = self.agent_config.get('prompt', "Please respond appropriately.")
         self.action_separator = self.agent_config.get('action_separator', "||")
-        self.use_action = self.agent_config.get('use_action', True)
 
         # Define turn prompt template based on enable_think
         if self.enable_think:
-            if self.use_action:
-                self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {actions_remaining} actions remaining. Always output: <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
-            else:
-                self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nAlways output: <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
+            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {actions_remaining} actions remaining. Always output: <think> [Your thoughts] </think> <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
         else:
-            if self.use_action:
-                self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {actions_remaining} actions remaining. Always output: <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
-            else:
-                self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nAlways output: <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
-
+            self.turn_prompt_template = """Turn {turn_number}:\nState:\n{state}\nYou have {actions_remaining} actions remaining. Always output: <answer> [your answer] </answer> with no extra text. Strictly follow this format. Max response length: {max_tokens} tokens.\n"""
+            
         self.trajectory_history = MultiTurnTrajectory(max_length=self.max_turns)
         self.raw_response_list = []  # Store all raw LLM responses for debugging
         self.messages = [
@@ -67,26 +60,20 @@ class BaseAgent:
         # Calculate actions remaining based on max_actions_all_turns
         actions_remaining = max(0, self.max_actions_all_turns - self.total_actions_consumed)
         
-        if self.use_action:
-            turn_content = self.turn_prompt_template.format(
-                turn_number=self.cur_turn + 1,
-                state=env_out.state,
-                actions_remaining=actions_remaining,
-                max_tokens=self.max_tokens
-            )
-        else:
-            turn_content = self.turn_prompt_template.format(
-                turn_number=self.cur_turn + 1,
-                state=env_out.state,
-                max_tokens=self.max_tokens
-            )
+        turn_content = self.turn_prompt_template.format(
+            turn_number=self.cur_turn + 1,
+            state=env_out.state,
+            actions_remaining=actions_remaining,
+            max_tokens=self.max_tokens
+        )
+
         turn_msg = {"role": "user", "content": turn_content}
 
         # In the first turn, we merge the turn_content into the prompt
         if self.cur_turn == 0 and len(self.messages) == 2 and self.messages[1]["role"] == "user":
             self.messages[1]["content"] = self.messages[1]["content"] + "\n" + turn_content
         else:
-            reward_msg = f"Reward: {env_out.reward}"
+            reward_msg = f"Reward: \n{env_out.reward}\n"
             turn_msg["content"] =  reward_msg + " " + turn_msg["content"]
             self.messages.append(turn_msg)
         
@@ -114,10 +101,13 @@ class BaseAgent:
         """
         import re
 
-        if enable_think:
-            llm_response = '<think>' + llm_response
+        if self.agent_config.get('use_think_answer_token', True):
+            if enable_think:
+                llm_response = '<think>' + llm_response
+            else:
+                llm_response = '<answer>' + llm_response
         else:
-            llm_response = '<answer>' + llm_response
+            llm_response = llm_response
         
         # Define pattern based on enable_think
         pattern = r'<think>(.*?)</think>\s*<answer>(.*?)</answer>' if enable_think else r'<answer>(.*?)</answer>'
@@ -151,7 +141,7 @@ class BaseAgent:
                 processed_response = f"<think>{think_content}</think><answer>{action_content}</answer>"
             else:
                 processed_response = f"<answer>{action_content}</answer>"
-        
+                
         return processed_response, actions
 
     # ─────────────────── ROLLOUT STATE COLLECTION ───────────────────

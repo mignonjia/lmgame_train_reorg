@@ -19,6 +19,9 @@ class GSM8KAgent(BaseAgent):
     def __init__(self, config, group_id=0, agent_id=0, seed=None, tag=None):
         super().__init__(config, group_id, agent_id, seed, tag)
         self.initialize_env()
+        if self.agent_config.get('use_custom_prompt', False):
+            self.prompt = "You are solving Math problems. Let's think step by step. Always put the answer in integer at the end of your response."
+            self.turn_prompt_template = """Incorrect Answer.\nQuestion:\n{state}\nPlease think again."""
 
     def initialize_env(self):
         """Initialize the GSM8K environment."""
@@ -45,13 +48,18 @@ class GSM8KAgent(BaseAgent):
         total_reward = 0
         done = False
         info = {}  # Initialize info dictionary
-
-        if len(actions) != 0:
+        # If use_custom_prompt is True, we only use the last action as the answer
+        if self.agent_config.get('use_custom_prompt', False):
+            actions = [processed_llm_response]
             obs, reward, done, step_info = self.env.step(actions[-1])
-            total_reward += reward
             info.update(step_info)
         else:
-            self.penalty += self.format_penalty
+            if len(actions) != 0:
+                obs, reward, done, step_info = self.env.step(actions[-1])
+                total_reward += reward
+                info.update(step_info)
+            else:
+                self.penalty += self.format_penalty
 
         self.total_actions_consumed += len(actions)
 
@@ -70,7 +78,7 @@ class GSM8KAgent(BaseAgent):
             llm_raw_response=llm_raw_response
         ))
 
-        # debug_printout_in_env_output(self.messages, actions)
+        # debug_printout_in_env_output(self.messages, actions, self.tag)
 
         return EnvOutput(
             truncated=done,

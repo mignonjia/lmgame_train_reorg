@@ -70,10 +70,11 @@ def all_seed(seed):
         random.setstate(random_state)
         np.random.set_state(np_random_state)
 
-def debug_printout_in_env_output(messages, actions):
+def debug_printout_in_env_output(messages, actions, tag):
     print("="*40)
     print("DEBUG: Messages and Actions")
     print("="*40)
+    print(f"Agent Tag: {tag}")
     
     print("Messages:")
     for i, message in enumerate(messages):
@@ -86,6 +87,6 @@ def debug_printout_in_env_output(messages, actions):
     
     print("\nActions:")
     for i, action in enumerate(actions):
-        print(f"  [{i}] {action}")
+        print(f"  [{i}] {repr(action)}")
     
     print("="*40)

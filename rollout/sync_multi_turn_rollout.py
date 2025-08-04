@@ -159,12 +159,11 @@ class SyncMultiTurnRollout:
             except Exception as e:
                 prompt_str = "System error in chat template"
 
-            if agent.agent_config.get('enable_think', True):
-                prompt_str += "<think>"
-            else:
-                prompt_str += "<answer>"
-        
-
+            if agent.agent_config.get('use_think_answer_token', True):
+                if agent.agent_config.get('enable_think', True):
+                    prompt_str += "<think>"
+                else:
+                    prompt_str += "<answer>"
             
             llm_input_texts.append(prompt_str)
         

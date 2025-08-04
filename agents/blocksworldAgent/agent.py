@@ -80,7 +80,7 @@ class BlocksworldAgent(BaseAgent):
             llm_raw_response=llm_raw_response
         ))
 
-        # debug_printout_in_env_output(self.messages, actions)
+        # debug_printout_in_env_output(self.messages, actions, self.tag)
 
 
         return EnvOutput(
