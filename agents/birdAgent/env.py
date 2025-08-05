@@ -25,12 +25,34 @@ class BirdEnv(BaseEnv):
         super().__init__()
         self.config = config
 
+        # ── ensure dataset_path is absolute ──────────────────────────────
+        raw_path = self.config.get("dataset_path", "")
+        if raw_path and not os.path.isabs(raw_path):
+            # assume this file lives at <repo>/agents/birdAgent/env.py
+            repo_root = Path(__file__).resolve().parents[2]  # adjust if your layout differs
+            abs_path = (repo_root / raw_path).resolve()
+            self.config["dataset_path"] = str(abs_path)
+        # ─────────────────────────────────────────────────────────────────
+
+        # ── ensure db_root is absolute ───────────────────────────────────
+        raw_db = self.config.get("db_root",
+                                 "datasets/bird_train/train/train_databases")
+        if raw_db and not os.path.isabs(raw_db):
+            repo_root = Path(__file__).resolve().parents[2]
+            abs_db = (repo_root / raw_db).resolve()
+            self.config["db_root"] = str(abs_db)
+        # ─────────────────────────────────────────────────────────────────
+
+
         # Load dataset from local JSON or HuggingFace repo
         if self.config.get('dataset_path', '').endswith(".json"):
-            with open(self.config.get('dataset_path', ''), encoding="utf-8") as f:
-                self.dataset: List[Dict[str, str]] = [json.loads(line) for line in f]
+            with open(self.config['dataset_path'], encoding="utf-8") as f:
+                self.dataset = [json.loads(line) for line in f]
         else:
-            self.dataset = load_dataset(self.config.get('dataset_path', ''), split=self.config.get('split', 'train'))
+            self.dataset = load_dataset(
+                self.config.get('dataset_path', ''), 
+                split=self.config.get('split', 'train')
+            )
 
         # Runtime state variables
         self.sample: Dict[str, str] | None = None
@@ -48,7 +70,12 @@ class BirdEnv(BaseEnv):
         return sql.strip()
 
     def _db_file(self) -> str:
-        return os.path.join(self.config.get('db_root', "datasets/bird_train/train/train_databases"), self.db_id, f"{self.db_id}.sqlite")
+        return os.path.join(
+            self.config['db_root'],
+            self.db_id,
+            f"{self.db_id}.sqlite"
+        )
+
 
     def _execute_sql(self, sql: str) -> Tuple[bool, Union[List[Tuple[Any, ...]], str]]:
         """Execute *one* SQL statement and fetch all results."""
