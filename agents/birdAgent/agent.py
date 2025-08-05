@@ -51,7 +51,7 @@ class BirdAgent(BaseAgent):
         for action_str in actions:
             action_str_clean = action_str.strip()
             obs, reward, done, step_info = self.env.step(action_str_clean)
-            if step_info['action_is_valid']:
+            if step_info['action_is_valid(code_block)']:
                 valid_actions.append(action_str)
             else:
                 invalid_actions.append(action_str)
