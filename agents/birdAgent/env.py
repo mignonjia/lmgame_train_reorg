@@ -42,6 +42,11 @@ class BirdEnv(BaseEnv):
             abs_db = (repo_root / raw_db).resolve()
             self.config["db_root"] = str(abs_db)
         # ─────────────────────────────────────────────────────────────────
+        # #-----------------------------------------------------------------
+        # # debugging: set db_root to home for testing
+        # self.config["dataset_path"] = str(Path.home() / "datasets/bird_train/train/train_with_schema.json")
+        # self.config["db_root"] = str(Path.home() / "datasets/bird_train/train/train_databases")
+        # #-----------------------------------------------------------------
 
 
         # Load dataset from local JSON or HuggingFace repo

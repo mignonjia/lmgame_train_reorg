@@ -163,7 +163,8 @@ class AgentTrainer(RayPPOTrainer):
         
         
         rollout_batch, filter_metrics = self.multi_turn_rollout.filter_rollout(rollout_batch) 
-       
+
+        self.multi_turn_rollout.reset()  # Reset for next rollout
         
         # Return the complete DataProto and metrics as tuple consistently
         return rollout_batch, filter_metrics
@@ -540,6 +541,8 @@ class AgentTrainer(RayPPOTrainer):
         # MODIFICATION: Add test scores per data source like the example
         for data_source, rewards in data_source_reward.items():
             metric_dict[f'val-env/test_score/{data_source}'] = np.mean(rewards)
+
+        self.validation_multi_turn_rollout.reset()
 
         return metric_dict
     # ─────────────────── END MODIFICATION ───────────────────

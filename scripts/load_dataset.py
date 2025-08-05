@@ -33,6 +33,10 @@ def load_bird_dataset() -> tuple[Path, Path] | None:
 
     # where we'll drop them
     repo_root  = _find_repo_root(Path(__file__).parent)
+    # # ---------------------------------------------------
+    # # debugging repo_root = home
+    # repo_root = Path.home()  # for testing purposes, set to home
+    # # ---------------------------------------------------
     local_root = repo_root / "datasets" / "bird_train" / "train"
     json_path  = local_root / "train_with_schema.json"
     db_root    = local_root / "train_databases"

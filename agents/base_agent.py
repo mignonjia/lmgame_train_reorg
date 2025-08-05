@@ -213,6 +213,8 @@ class BaseAgent:
             reset_seed = seed
             
         obs = self.env.reset(seed=reset_seed)
+        if not obs:
+            obs = self.env.render()
         
         self.cur_turn = 0
         
