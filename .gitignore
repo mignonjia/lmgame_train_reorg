@@ -140,3 +140,5 @@ cache_example/
 
 setup_log.txt
 tmp/
+
+datasets/

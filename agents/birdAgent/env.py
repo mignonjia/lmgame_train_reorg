@@ -116,6 +116,10 @@ class BirdEnv(BaseEnv):
     def reset(self, seed: int | None = None, **kwargs) -> Any:
         with all_seed(seed):
             self.sample = random.choice(self.dataset)
+        print("=" * 60)
+        print(f"self.sample: {self.sample}")
+        print(self.sample.keys())
+        print("=" * 60)
 
         self.question = self.sample["question"]
         self.gold_sql = self.sample["SQL"]

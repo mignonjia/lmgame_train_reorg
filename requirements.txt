@@ -82,6 +82,9 @@ jinja2
 networkx
 setuptools
 
+# for downloading the full WebShop dataset
+gdown>=4.6.6
+
 # =============================================================================
 # CUDA & GPU SUPPORT (Auto-installed with torch)
 # =============================================================================

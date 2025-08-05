@@ -8,6 +8,9 @@ IFS=$'\n\t'
 
 # Install webshop-minimal
 INSTALL_WEBSHOP=${INSTALL_WEBSHOP:-0}   # export INSTALL_WEBSHOP=1 to enable
+LOAD_WEBSHOP_DATASET=${LOAD_WEBSHOP_DATASET:-0}   # export LOAD_WEBSHOP_DATASET=1 to enable
+LOAD_BIRD_DATASET=${LOAD_BIRD_DATASET:-0}   # export LOAD_BIRD_DATASET=1 to enable
+LOAD_DATASET=${LOAD_DATASET:-0}   # export LOAD_DATASET=1 to enable
 
 
 # Setup logging
@@ -180,6 +183,18 @@ install_webshop() {
 
     python -m spacy download en_core_web_sm
     python -m spacy download en_core_web_lg
+
+    if [[ "$LOAD_DATASET" == 1 ]]; then
+        if [[ "$LOAD_WEBSHOP_DATASET" == 1 ]]; then
+            print_step "Downloading full data set..."
+            mkdir -p external/webshop-minimal/webshop_minimal/data/full
+            cd external/webshop-minimal/webshop_minimal/data/full
+            gdown https://drive.google.com/uc?id=1A2whVgOO0euk5O13n2iYDM0bQRkkRduB # items_shuffle
+            gdown https://drive.google.com/uc?id=1s2j6NgHljiZzQNL3veZaAiyW_qDEgBNi # items_ins_v2
+            cd ../../../../..
+            print_success "webshop-minimal full data set downloaded"
+        fi
+    fi
 }
 
 
@@ -391,6 +406,7 @@ main() {
     setup_authentication
     verify_submodule verl
     verify_submodule external/webshop-minimal
+
     
     echo "=========================================="
     echo -e "${GREEN}Setup completed successfully!${NC}"
@@ -403,7 +419,10 @@ main() {
     echo ""
     echo "Current environment: $CONDA_DEFAULT_ENV"
     # ─── end-of-script hint (just before final echo lines) ─────────────────
-    echo "Tip: run  INSTALL_WEBSHOP=1 ./setup.sh  if you later need WebShop support"
+    echo "Tip: set  INSTALL_WEBSHOP=1 to setup WebShop support"
+    echo "Tip: set  LOAD_DATASET=1 to load datasets"
+    echo "Tip: set  LOAD_WEBSHOP_DATASET=1 to load WebShop dataset"
+    echo "Tip: set  LOAD_BIRD_DATASET=1 to load Bird dataset"
 
 }
 

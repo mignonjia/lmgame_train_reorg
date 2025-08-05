@@ -1,6 +1,7 @@
 import sys
 import os
 from pathlib import Path
+import sys, subprocess, importlib.util
 
 # Add the external webshop-minimal package to the Python path
 project_root = Path(__file__).parent.parent.parent
@@ -13,6 +14,7 @@ from agents.agent_utils import all_seed
 import random
 import string
 from webshop_minimal.utils import (
+    init_basedir,
     DEFAULT_FILE_PATH,
 )
 from agents.base_env import BaseEnv
@@ -33,6 +35,8 @@ class WebShopEnv(WebAgentTextEnv, BaseEnv):
         self.show_attrs = self.config.get('show_attrs', False)
         self.dataset_size = self.config.get('dataset_size', 'small')
         self.render_cache = None
+
+        init_basedir(self.dataset_size)
 
         WebAgentTextEnv.__init__(
             self,
