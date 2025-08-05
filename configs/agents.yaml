@@ -227,7 +227,6 @@ birdAgent:
     max_steps: 5
     dataset_path: "datasets/bird_train/train/train_with_schema.json"
     db_root: "datasets/bird_train/train/train_databases"
-    split: "train"
 
 
 # ------ Webshop Agent & Env Configs ------

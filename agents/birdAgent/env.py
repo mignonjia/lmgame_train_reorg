@@ -11,7 +11,6 @@ from datasets import load_dataset
 from agents.agent_utils import all_seed
 from agents.base_env import BaseEnv
 from pathlib import Path
-import tempfile
 
 
 
@@ -48,37 +47,8 @@ class BirdEnv(BaseEnv):
         sql = re.sub(r"\s+", " ", sql)
         return sql.strip()
 
-    # ── inside BirdEnv (replace the old _db_file) ─────────────────────────
     def _db_file(self) -> str:
-        """
-        Resolve `<db_root>/<db_id>/<db_id>.sqlite>` and make sure its directory
-        exists.  The lookup order is:
-
-        1.  config["db_root"]              ← user-supplied absolute/relative path
-        2.  <repo>/datasets/<name>/databases
-            where  <name> is the last path fragment of `dataset_path`
-        3.  a fresh tmp dir,  /tmp/birdsql_<rand>/
-
-        All paths are created with  parents=True, exist_ok=True.
-        """
-        #  explicit path in the YAML / config  ─────────────────────────
-        db_root = Path(self.config.get("db_root", ""))
-
-        #  fallback beside the dataset  ────────────────────────────────
-        if not db_root:
-            ds_stub = Path(str(self.config.get("dataset_path", ""))).name or "default"
-            db_root = Path(__file__).resolve().parent / "datasets" / ds_stub / "databases"
-
-        #  last resort: throw-away tmp dir  ────────────────────────────
-        if not db_root:
-            db_root = Path(tempfile.mkdtemp(prefix="birdsql_"))
-
-        # materialise <db_root>/<db_id>/  if needed
-        db_dir = db_root / self.db_id
-        db_dir.mkdir(parents=True, exist_ok=True)
-
-        return str(db_dir / f"{self.db_id}.sqlite")
-
+        return os.path.join(self.config.get('db_root', "datasets/bird_train/train/train_databases"), self.db_id, f"{self.db_id}.sqlite")
 
     def _execute_sql(self, sql: str) -> Tuple[bool, Union[List[Tuple[Any, ...]], str]]:
         """Execute *one* SQL statement and fetch all results."""

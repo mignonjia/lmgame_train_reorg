@@ -36,6 +36,13 @@ class WebShopEnv(WebAgentTextEnv, BaseEnv):
         self.dataset_size = self.config.get('dataset_size', 'small')
         self.render_cache = None
 
+        if self.server == "None":
+            self.server = None
+        if self.filter_goals == "None":
+            self.filter_goals = None
+        if self.num_products == "None":
+            self.num_products = None
+
         init_basedir(self.dataset_size)
 
         WebAgentTextEnv.__init__(
@@ -115,13 +122,3 @@ class WebShopEnv(WebAgentTextEnv, BaseEnv):
                 available_actions.append(f'click[{clickable}]')
         # TODO: we may need to purge the case when available_actions == ['click[back to search]', 'click[< prev]', 'click[next >]']
         return available_actions
-
-if __name__ == '__main__':
-    env = WebShopEnv()
-    all_obs = []
-    for i in range(10):
-        env.reset()
-        all_obs.append(env.observation)
-
-    set_obs = set(all_obs)
-    print(len(set_obs))

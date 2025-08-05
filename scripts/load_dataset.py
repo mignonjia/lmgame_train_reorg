@@ -3,6 +3,7 @@
 import os
 import sys
 import zipfile
+import shutil
 from pathlib import Path
 
 from huggingface_hub import hf_hub_download
@@ -10,56 +11,11 @@ from huggingface_hub import hf_hub_download
 def _find_repo_root(start: Path) -> Path:
     cur = start.resolve()
     while cur != cur.parent:
-        if (cur / "external" / "webshop-minimal").is_dir():
+        if (cur / "datasets").is_dir() or (cur / "configs").is_dir():
             return cur
         cur = cur.parent
-    raise FileNotFoundError("Could not locate project root containing 'external/webshop-minimal'")
+    raise FileNotFoundError("Could not locate project root containing 'datasets' or 'configs'")
 
-def load_webshop_dataset() -> Path | None:
-    """
-    Download the WebShop JSON files directly from Hugging Face Dataset Hub
-    (Yuxuan13/webshop_dataset) into:
-      <repo>/external/webshop-minimal/webshop_minimal/data/full/
-
-    Returns the path to items_shuffle.json on success, or None on failure.
-    """
-    repo_id   = "Yuxuan13/webshop_dataset"
-    repo_type = "dataset"
-    filenames = ["items_shuffle.json", "items_ins_v2.json"]
-
-    # target directory in the local repo
-    repo_root = _find_repo_root(Path(__file__).parent)
-    data_dir  = repo_root / "external" / "webshop-minimal" \
-                          / "webshop_minimal" / "data" / "full"
-    data_dir.mkdir(parents=True, exist_ok=True)
-
-    local_paths = []
-    for fname in filenames:
-        try:
-            print(f"[load_webshop_dataset] Downloading {fname} from {repo_id}…", file=sys.stderr)
-            path = hf_hub_download(
-                repo_id=repo_id,
-                filename=fname,
-                repo_type=repo_type,
-                cache_dir=str(data_dir),      # you can omit to use default cache
-                library_name="hf_hub_download"
-            )
-        except Exception as e:
-            print(f"[load_webshop_dataset] ERROR downloading {fname}: {e}", file=sys.stderr)
-            return None
-
-        # hf_hub_download returns the cache path; now copy it into data_dir
-        dest = data_dir / fname
-        if not dest.exists():
-            try:
-                Path(path).replace(dest)
-            except Exception:
-                # fallback to a byte‐copy if replace fails
-                dest.write_bytes(Path(path).read_bytes())
-        local_paths.append(dest)
-
-    print("[load_webshop_dataset] All files downloaded ✔", file=sys.stderr)
-    return local_paths[0]  # items_shuffle.json
 def load_bird_dataset() -> tuple[Path, Path] | None:
     """
     Download + unzip the BirdSQL training set (Yuxuan13/bird_train)
@@ -68,10 +24,9 @@ def load_bird_dataset() -> tuple[Path, Path] | None:
       - train_databases/  (unzipped)
     Returns (json_path, db_root) on success, or None on failure.
     """
-    from huggingface_hub import hf_hub_download
-    import zipfile, shutil, sys
 
     hf_repo      = "Yuxuan13/bird_train"
+    repo_type    = "dataset"
     # files live at repo root
     json_in_repo = "train_with_schema.json"
     zip_in_repo  = "train_databases.zip"
@@ -90,6 +45,7 @@ def load_bird_dataset() -> tuple[Path, Path] | None:
             hf_hub_download(
                 repo_id=hf_repo,
                 filename=json_in_repo,
+                repo_type=repo_type,
                 local_dir=str(local_root),
                 local_dir_use_symlinks=False
             )
@@ -100,26 +56,61 @@ def load_bird_dataset() -> tuple[Path, Path] | None:
         print("[load_bird_dataset] JSON already present; skipping.", file=sys.stderr)
 
     # 2) Download & extract DB ZIP if missing
-    if not db_root.is_dir():
-        print("[load_bird_dataset] Downloading + extracting DB zip…", file=sys.stderr)
+    zip_path = local_root / "train_databases.zip"
+    
+    # Download zip if it doesn't exist
+    if not zip_path.exists():
+        print("[load_bird_dataset] Downloading DB zip…", file=sys.stderr)
         try:
             zip_path = hf_hub_download(
                 repo_id=hf_repo,
                 filename=zip_in_repo,
+                repo_type=repo_type,
                 local_dir=str(local_root),
                 local_dir_use_symlinks=False
             )
+        except Exception as e:
+            print(f"[load_bird_dataset] ERROR fetching DB zip: {e}", file=sys.stderr)
+            return None
+    else:
+        print("[load_bird_dataset] DB zip already downloaded.", file=sys.stderr)
+    
+    # Extract zip if database directory doesn't exist
+    if not db_root.is_dir():
+        print("[load_bird_dataset] Extracting DB zip…", file=sys.stderr)
+        try:
             tmp_dir = local_root / "tmp_unzip"
             with zipfile.ZipFile(zip_path, "r") as zf:
                 zf.extractall(tmp_dir)
-            tmp_dir.rename(db_root)
-        except Exception as e:
-            print(f"[load_bird_dataset] ERROR fetching/extracting DB: {e}", file=sys.stderr)
+            
+            # The zip file contains a train_databases folder, so we need to move its contents
+            extracted_db_dir = tmp_dir / "train_databases"
+            if extracted_db_dir.exists():
+                # Move the extracted train_databases folder to our target location
+                extracted_db_dir.rename(db_root)
+            else:
+                # If the zip doesn't contain a train_databases folder, move the tmp_dir contents
+                tmp_dir.rename(db_root)
+            
+            # Clean up any remaining tmp directory
             if tmp_dir.exists():
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                
+        except Exception as e:
+            print(f"[load_bird_dataset] ERROR extracting DB zip: {e}", file=sys.stderr)
+            if 'tmp_dir' in locals() and tmp_dir.exists():
                 shutil.rmtree(tmp_dir, ignore_errors=True)
             return None
     else:
-        print("[load_bird_dataset] DB already extracted; skipping.", file=sys.stderr)
+        print("[load_bird_dataset] DB already extracted; skipping extraction.", file=sys.stderr)
+    
+    # Delete the zip file after successful extraction to save space
+    if zip_path.exists() and db_root.is_dir():
+        try:
+            zip_path.unlink()
+            print(f"[load_bird_dataset] Deleted zip file: {zip_path}", file=sys.stderr)
+        except Exception as e:
+            print(f"[load_bird_dataset] Warning: Could not delete zip file: {e}", file=sys.stderr)
 
     # final sanity check
     if not json_path.exists() or not db_root.is_dir():
@@ -132,14 +123,8 @@ def load_bird_dataset() -> tuple[Path, Path] | None:
 
 def main() -> None:
     """
-    Entry point: controlled by env-vars LOAD_WEBSHOP_DATASET and LOAD_BIRD_DATASET.
+    Entry point: controlled by env-var LOAD_BIRD_DATASET.
     """
-    if os.getenv("LOAD_WEBSHOP_DATASET", "").lower() in {"1", "true", "yes"}:
-        path = load_webshop_dataset()
-        print(f"[main] WebShop → {path}")
-    else:
-        print("[main] Skipping WebShop.")
-
     if os.getenv("LOAD_BIRD_DATASET", "").lower() in {"1", "true", "yes"}:
         result = load_bird_dataset()
         if result:

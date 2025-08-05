@@ -183,18 +183,6 @@ install_webshop() {
 
     python -m spacy download en_core_web_sm
     python -m spacy download en_core_web_lg
-
-    if [[ "$LOAD_DATASET" == 1 ]]; then
-        if [[ "$LOAD_WEBSHOP_DATASET" == 1 ]]; then
-            print_step "Downloading full data set..."
-            mkdir -p external/webshop-minimal/webshop_minimal/data/full
-            cd external/webshop-minimal/webshop_minimal/data/full
-            gdown https://drive.google.com/uc?id=1A2whVgOO0euk5O13n2iYDM0bQRkkRduB # items_shuffle
-            gdown https://drive.google.com/uc?id=1s2j6NgHljiZzQNL3veZaAiyW_qDEgBNi # items_ins_v2
-            cd ../../../../..
-            print_success "webshop-minimal full data set downloaded"
-        fi
-    fi
 }
 
 
@@ -320,6 +308,23 @@ verify_submodule() {
     fi
 }
 
+load_dataset() {
+    if [[ "$LOAD_WEBSHOP_DATASET" == 1 ]]; then
+        print_step "Downloading full data set..."
+        mkdir -p external/webshop-minimal/webshop_minimal/data/full
+        cd external/webshop-minimal/webshop_minimal/data/full
+        gdown https://drive.google.com/uc?id=1A2whVgOO0euk5O13n2iYDM0bQRkkRduB # items_shuffle
+        gdown https://drive.google.com/uc?id=1s2j6NgHljiZzQNL3veZaAiyW_qDEgBNi # items_ins_v2
+        cd ../../../../..
+        print_success "webshop-minimal full data set downloaded"
+    fi
+    if [[ "$LOAD_BIRD_DATASET" == 1 ]]; then
+        print_step "Loading Bird dataset..."
+        python scripts/load_dataset.py
+        print_success "Bird dataset loaded"
+    fi
+}
+
 
 # Check and setup authentication
 setup_authentication() {
@@ -397,6 +402,11 @@ main() {
         install_webshop
     else
         print_warning "Skipping WebShop install (set INSTALL_WEBSHOP=1 to enable)"
+    fi
+    if [[ "$LOAD_DATASET" == 1 ]]; then
+        load_dataset
+    else
+        print_warning "Skipping dataset loading (set LOAD_DATASET=1 to enable)"
     fi
     install_torch
     install_flash_attn

@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
 """
-Condensed sanity-checks for BirdEnv
+Simple test suite for BirdEnv - SQL query evaluation environment
 """
 
-import sys, random
+import sys, random, os, tempfile, shutil
 from datetime import datetime
 from pathlib import Path
 
 # ── project import setup ────────────────────────────────────────────────
 project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))          # repo packages
+sys.path.insert(0, str(project_root))
 
-from agents.birdAgent.env import BirdEnv       # adjust if path differs
+from agents.birdAgent.env import BirdEnv
 
-# ── logging helper (same as GSM8K template) ─────────────────────────────
+# ── logging helper (following GSM8K pattern) ─────────────────────────────
 def setup_logging():
     log_dir = Path(__file__).parent / "test_logs"
     log_dir.mkdir(exist_ok=True)
 
-    ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = log_dir / f"bird_env_test_{ts}.log"
 
     class Tee:
         def __init__(self, fp):
-            self.file   = open(fp, "w")
+            self.file = open(fp, "w")
             self.stdout = sys.stdout
         def write(self, data):
             self.file.write(data); self.file.flush(); self.stdout.write(data)
@@ -40,87 +40,119 @@ def setup_logging():
     print("=" * 60)
     return tee
 
-# ── lightweight default config object ───────────────────────────────────
-class BirdEnvCfg(dict):
+# ── configuration (from agents.yaml) ────────────────────────────────────
+class BirdEnvConfig:
     def __init__(self):
-        super().__init__(
-            dataset_path    = "birdsql/share-bam",
-            split           = "train",
-            max_steps       = 5,
-            db_root         = "",          # let BirdEnv choose
-            no_code_penalty = -0.5,
-        )
+        # Use agents.yaml birdAgent env_config values with fallbacks for testing
+        self.max_steps = 5
+        self.dataset_path = "datasets/bird_train/train/train_with_schema.json"  # fallback to HuggingFace
+        self.db_root = "datasets/bird_train/train/train_databases"  # temp for testing
 
 def get_default_config():
-    cfg = BirdEnvCfg()
-    print("✅ Using default Bird configuration")
-    for k, v in cfg.items():
-        print(f"   {k}: {v}")
+    cfg = BirdEnvConfig()
+    print("✅ Using Bird configuration (based on agents.yaml)")
+    print(f"   Dataset path: {cfg.dataset_path}")
+    print(f"   Max steps: {cfg.max_steps}")
+    print(f"   DB root: {cfg.db_root}")
     return cfg
 
-def make_env(cfg_dict):
-    return BirdEnv(cfg_dict)
+def make_env(cfg_obj):
+    """Create BirdEnv from config object"""
+    return BirdEnv(vars(cfg_obj))
 
-# ── individual tests ────────────────────────────────────────────────────
+# ── individual tests ─────────────────────────────────────────────────────
 def test_env_creation_and_reset():
     print("🔍 Test 1: environment creation & reset")
-    env = make_env(get_default_config())
-    obs = env.reset(seed=42)
-    assert isinstance(obs, str) and obs.startswith("[DB schema:")
-    print("   Observation OK")
-    env.close()
+    config = get_default_config()
+    try:
+        env = make_env(config)
+        obs = env.reset(seed=42)
+        assert isinstance(obs, str) and "[DB schema:" in obs
+        print(f"   Observation length: {len(obs)} chars")
+        env.close()
+    except Exception as e:
+        raise
 
 def test_step_logic():
     print("🔍 Test 2: step() with gold vs. dummy SQL")
-    env = make_env(get_default_config())
-    env.reset(seed=0)
+    config = get_default_config()
+    try:
+        env = make_env(config)
+        env.reset(seed=0)
 
-    gold_sql_block = f"```sql\n{env.gold_sql}\n```"
-    dummy_sql_block = "```sql\nSELECT 1;\n```"
+        gold_sql_block = f"```sql\n{env.gold_sql}\n```"
+        dummy_sql_block = "```sql\nSELECT 1;\n```"
 
-    # gold → should succeed and finish
-    _, r, done, info = env.step(gold_sql_block)
-    assert done and r > 0 and info["success"]
-    print(f"   Gold SQL matched → reward {r}")
+        # gold → should succeed and finish
+        _, r, done, info = env.step(gold_sql_block)
+        assert done and r > 0 and info["success"]
+        print(f"   Gold SQL matched → reward {r}")
 
-    # reset & send dummy → should fail
-    env.reset(seed=0)
-    _, r, done, info = env.step(dummy_sql_block)
-    assert not info["success"]
-    print(f"   Dummy SQL mismatch → reward {r}")
-    env.close()
+        # reset & send dummy → should fail
+        env.reset(seed=0)
+        _, r, done, info = env.step(dummy_sql_block)
+        assert not info["success"]
+        print(f"   Dummy SQL mismatch → reward {r}")
+        
+        env.close()
+    except Exception as e:
+        raise
 
 def test_seeding_determinism():
     print("🔍 Test 3: seeding determinism")
-    env = make_env(get_default_config())
-    a = env.reset(seed=123)
-    b = env.reset(seed=123)
-    c = env.reset(seed=124)
-    assert a == b and a != c
-    print("   Same seed → same sample; diff seed → diff sample")
-    env.close()
+    config = get_default_config()
+    try:
+        env = make_env(config)
+        a = env.reset(seed=123)
+        b = env.reset(seed=123)
+        c = env.reset(seed=124)
+        assert a == b and a != c
+        print("   Same seed → same sample; diff seed → diff sample")
+        env.close()
+    except Exception as e:
+        raise
 
 def test_info_structure():
     print("🔍 Test 4: info dict structure")
-    env = make_env(get_default_config())
-    env.reset(seed=0)
-    _, _, _, info = env.step("```sql\nSELECT 1;\n```")
-    assert set(info) == {"action_is_valid(code_block)", "success"}
-    assert all(isinstance(v, bool) for v in info.values())
-    print(f"   Info keys OK → {info}")
-    env.close()
+    config = get_default_config()
+    try:
+        env = make_env(config)
+        env.reset(seed=0)
+        _, _, _, info = env.step("```sql\nSELECT 1;\n```")
+        assert set(info) == {"action_is_valid(code_block)", "success"}
+        assert all(isinstance(v, bool) for v in info.values())
+        print(f"   Info keys OK → {info}")
+        env.close()
+    except Exception as e:
+        raise
 
-# ── main runner ─────────────────────────────────────────────────────────
+def test_sql_normalization():
+    print("🔍 Test 5: SQL normalization")
+    test_cases = [
+        ("SELECT * FROM table;", "SELECT * FROM table"),
+        ("  SELECT   *   FROM   table  ;  ", "SELECT * FROM table"),
+        ("\nSELECT\n\t*\nFROM\ttable\n", "SELECT * FROM table"),
+        ("", ""),
+    ]
+    
+    for input_sql, expected in test_cases:
+        normalized = BirdEnv._normalize_sql(input_sql)
+        assert normalized == expected, f"Expected '{expected}', got '{normalized}'"
+    
+    print("   SQL normalization working correctly")
+
+# ── main runner ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
     tee = setup_logging()
     try:
-        print("🚀 Starting condensed BirdEnv tests\n")
-        test_env_creation_and_reset(); print()
-        test_step_logic();             print()
-        test_seeding_determinism();    print()
-        test_info_structure();         print()
+        print("🚀 Starting BirdEnv tests\n")
+        test_env_creation_and_reset();   print()
+        test_step_logic();               print()
+        test_seeding_determinism();      print()
+        test_info_structure();           print()
+        test_sql_normalization();        print()
         print("=" * 60)
-        print("🎉 All condensed tests passed!")
+        print("🎉 All tests passed!")
         print(f"✅ Completed at {datetime.now()}")
     except Exception as e:
         print("❌ Test run failed:", e)

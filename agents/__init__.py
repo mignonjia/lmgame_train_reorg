@@ -52,3 +52,4 @@ from agents.sokobanAgent.agent import SokobanAgent
 from agents.gsm8kAgent.agent import GSM8KAgent
 from agents.blocksworldAgent.agent import BlocksworldAgent
 from agents.tetrisAgent.agent import TetrisAgent
+from agents.webshopAgent.agent import WebShopAgent
