@@ -69,6 +69,7 @@ def load_bird_dataset() -> tuple[Path, Path] | None:
                 local_dir=str(local_root),
                 local_dir_use_symlinks=False
             )
+            zip_path = Path(zip_path) 
         except Exception as e:
             print(f"[load_bird_dataset] ERROR fetching DB zip: {e}", file=sys.stderr)
             return None
