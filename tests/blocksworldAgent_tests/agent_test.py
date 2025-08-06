@@ -10,12 +10,12 @@ from datetime import datetime
 from pathlib import Path
 
 # --- project root ---------------------------------------------------------
-# go up TWO levels from tests/blocksworld_tests/agent_test.py
+# go up TWO levels from tests/blocksworldAgent_tests/agent_test.py
 project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
 # ── agent under test ────────────────────────────────────────────────────
-from agents.blocksworldAgent.agent import BlocksworldAgent
+from LMGameRL.agents.blocksworldAgent.agent import BlocksworldAgent
 
 # ────────────────────────── logging helper ──────────────────────────────
 def setup_logging() -> "Tee":

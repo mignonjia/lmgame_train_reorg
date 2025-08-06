@@ -7,10 +7,10 @@ from datetime import datetime
 from pathlib import Path
 
 # Add project root to path
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
-from agents.sokobanAgent.env import SokobanEnv
+from LMGameRL.agents.sokobanAgent.env import SokobanEnv
 
 
 # Setup logging to file
@@ -52,7 +52,7 @@ def setup_logging():
 def get_default_config():
     """Get default configuration for Sokoban environment from agents.yaml"""
     # Load configuration from agents.yaml
-    config_path = os.path.join(os.path.dirname(__file__), '../../configs/agents.yaml')
+    config_path = os.path.join(os.path.dirname(__file__), '../../LMGameRL/configs/agents.yaml')
     
     try:
         with open(config_path, 'r') as f:

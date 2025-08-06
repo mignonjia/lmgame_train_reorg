@@ -8,10 +8,10 @@ from datetime import datetime
 from pathlib import Path
 
 # ── project import setup ────────────────────────────────────────────────
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
-from agents.birdAgent.env import BirdEnv
+from LMGameRL.agents.birdAgent.env import BirdEnv
 
 # ── logging helper (following GSM8K pattern) ─────────────────────────────
 def setup_logging():

@@ -9,13 +9,13 @@ import yaml
 import json
 from pathlib import Path
 from datetime import datetime
-import yaml
-from agents.sokobanAgent.agent import SokobanAgent
-from agents.agent_utils import parse_model_response
 
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
+# Add project root to path for LMGameRL package
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
+
+from LMGameRL.agents.sokobanAgent.agent import SokobanAgent
+from LMGameRL.agents.agent_utils import parse_model_response
 
 
 # Setup logging to file

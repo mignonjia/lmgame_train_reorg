@@ -9,10 +9,10 @@ from datetime import datetime
 from pathlib import Path
 
 # ── project imports ─────────────────────────────────────────────────────
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
-from agents.tetrisAgent.agent import TetrisAgent      # adjust path if needed
+from LMGameRL.agents.tetrisAgent.agent import TetrisAgent      # adjust path if needed
 
 # ╭────────────────────────── LOGGING SETUP ───────────────────────────╮
 def setup_logging():

@@ -10,10 +10,10 @@ from datetime import datetime
 from pathlib import Path
 
 # ── project imports ───────────────────────────────────────────────────────────
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
-from agents.gsm8kAgent.agent import GSM8KAgent     # the agent under test
+from LMGameRL.agents.gsm8kAgent.agent import GSM8KAgent     # the agent under test
 
 # ────────────────────────── logging helper ────────────────────────────────────
 def setup_logging() -> "Tee":

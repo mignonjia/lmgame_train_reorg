@@ -13,12 +13,12 @@ from pathlib import Path
 from datetime import datetime
 
 # Add project root to path
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
 # Import real components
 from transformers import AutoTokenizer
-from rollout.sync_multi_turn_rollout import SyncMultiTurnRollout
+from LMGameRL.rollout.sync_multi_turn_rollout import SyncMultiTurnRollout
 from tests.rollout_tests.rollout_test_utils import create_mock_actor_wg, create_mock_tokenizer_decode
 
 

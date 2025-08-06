@@ -40,7 +40,10 @@ def load_bird_dataset() -> tuple[Path, Path] | None:
     except FileNotFoundError:
         print("❌ Could not find LMGameRL project root", file=sys.stderr)
         return None
-    
+    # # -----------------------------------------
+    # # debug load_dataset
+    # repo_root = Path.home()
+    # # -----------------------------------------
     local_root = repo_root / "datasets" / "bird_train" / "train"
     json_path = local_root / "train_with_schema.json"
     db_root = local_root / "train_databases"

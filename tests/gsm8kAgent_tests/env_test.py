@@ -3,10 +3,10 @@ from datetime import datetime
 from pathlib import Path
 
 # ── project imports ──────────────────────────────────────────────────────────
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
-from agents.gsm8kAgent.env import GSM8KEnv
+from LMGameRL.agents.gsm8kAgent.env import GSM8KEnv
 
 # ── logging helper (unchanged) ───────────────────────────────────────────────
 def setup_logging():
