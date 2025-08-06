@@ -37,8 +37,8 @@
 - [ ] Integrate more envs
     - [✅] Integrate gsm8k & blocksworld
     - [✅] Integrate Tetris env
-    - [ ] Align Env Parameters and Message Printout
-    - [ ] Integrate Agentic Webshop env
+    - [✅] Align Env Parameters and Message Printout
+    - [✅] Integrate Agentic Webshop env and bird env
 
 - [ ] Test general ability through all envs
 
