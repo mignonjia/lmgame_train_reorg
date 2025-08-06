@@ -42,11 +42,11 @@ class BirdEnv(BaseEnv):
             abs_db = (repo_root / raw_db).resolve()
             self.config["db_root"] = str(abs_db)
         # ─────────────────────────────────────────────────────────────────
-        # #-----------------------------------------------------------------
-        # # debugging: set db_root to home for testing
-        # self.config["dataset_path"] = str(Path.home() / "datasets/bird_train/train/train_with_schema.json")
-        # self.config["db_root"] = str(Path.home() / "datasets/bird_train/train/train_databases")
-        # #-----------------------------------------------------------------
+        #-----------------------------------------------------------------
+        # debugging: set db_root to home for testing
+        self.config["dataset_path"] = str(Path.home() / "datasets/bird_train/train/train_with_schema.json")
+        self.config["db_root"] = str(Path.home() / "datasets/bird_train/train/train_databases")
+        #-----------------------------------------------------------------
 
 
         # Load dataset from local JSON or HuggingFace repo
@@ -118,10 +118,6 @@ class BirdEnv(BaseEnv):
     def reset(self, seed: int | None = None, **kwargs) -> Any:
         with all_seed(seed):
             self.sample = random.choice(self.dataset)
-        print("=" * 60)
-        print(f"self.sample: {self.sample}")
-        print(self.sample.keys())
-        print("=" * 60)
 
         self.question = self.sample["question"]
         self.gold_sql = self.sample["SQL"]
