@@ -215,7 +215,7 @@ birdAgent:
   agent_type: "birdAgent"
   agent_config:
     system_prompt: 'You are an expert about text-to-SQL and pandas code.\n'
-    prompt: "Translate the question into SQL given database information. Replay with one fenced block that contains only SQL code:\n```sql\n...\n``\n."
+    prompt: "Translate the question into SQL given database information. Replay with one fenced block that contains only SQL code:\n```sql\n...\n```\nExample: <answer>```sql\nSELECT * FROM users WHERE age > 18;\n```</answer>"
     enable_think: True  # enable thinking before answering
     max_tokens: 100 # used to curate llm prompt "max words", not used for rollout
     max_turns: 1
