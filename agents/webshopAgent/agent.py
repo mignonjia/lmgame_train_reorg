@@ -80,7 +80,7 @@ class WebShopAgent(BaseAgent):
             llm_raw_response=llm_raw_response
         ))
 
-        debug_printout_in_env_output(self.messages, actions, self.tag)
+        # debug_printout_in_env_output(self.messages, actions, self.tag)
 
 
         return EnvOutput(

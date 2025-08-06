@@ -149,9 +149,6 @@ class BirdEnv(BaseEnv):
         gold_ok, gold_res_or_err = self._execute_sql(self.gold_sql)
         sub_ok, sub_res_or_err = self._execute_sql(submitted_sql)
 
-        print(f"golden sql results: {gold_res_or_err}")
-        print(f"generated sql results: {sub_res_or_err}")
-
         result_match = False
         sql_error_msg = ""
 
