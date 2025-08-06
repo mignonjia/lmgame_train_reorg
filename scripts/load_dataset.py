@@ -35,12 +35,16 @@ def load_bird_dataset() -> tuple[Path, Path] | None:
     repo_root  = _find_repo_root(Path(__file__).parent)
     # # ---------------------------------------------------
     # # debugging repo_root = home
-    # repo_root = Path.home()  # for testing purposes, set to home
+    # repo_root = Path.home() # for testing purposes, set to home
     # # ---------------------------------------------------
     local_root = repo_root / "datasets" / "bird_train" / "train"
     json_path  = local_root / "train_with_schema.json"
     db_root    = local_root / "train_databases"
     local_root.mkdir(parents=True, exist_ok=True)
+
+    print("=" * 40, file=sys.stderr)
+    print(f"[local root] {local_root}", file=sys.stderr)
+    print("=" * 40, file=sys.stderr)
 
     # 1) Download JSON if missing
     if not json_path.exists():

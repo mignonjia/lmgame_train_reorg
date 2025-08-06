@@ -50,6 +50,7 @@
 - [ ] Implement uv installation for faster package management
 - [ ] Create pyproject.toml to package as `lmgame_train`
 - [ ] Convert env_setup.sh into a open and useful script
+- [ ] Delete submodule and wrap up verl as a monkey patch
 
 ### 3. Feature Development
 
