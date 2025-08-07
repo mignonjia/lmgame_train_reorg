@@ -111,7 +111,7 @@ def check_config(config):
         raise ValueError("training and agent_group_num must have the same length")
 # ─────────────────── END MODIFICATION ───────────────────
 
-@hydra.main(config_path="configs", config_name="ppo_trainer", version_base=None)
+@hydra.main(config_path="../configs", config_name="ppo_trainer", version_base=None)
 def main(config):
 
     check_config(config)

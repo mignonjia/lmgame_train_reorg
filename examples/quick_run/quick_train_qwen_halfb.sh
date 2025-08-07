@@ -27,11 +27,7 @@ export CUDA_VISIBLE_DEVICES=0
 # Add lmgamerl to Python path
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 
-# ------ Run Training with Logging ------
-# Copy config file to the configs directory so train.py can find it
-cp "$PROJECT_ROOT/examples/quick_run/quick_train_qwen_halfb_config.yaml" "$PROJECT_ROOT/configs/"
-
-# Run training using the copied config
+# Use our config directly - Hydra will automatically merge with base config
 python lmgamerl/train.py \
   --config-name "quick_train_qwen_halfb_config" \
   2>&1 | tee "$LOG_FILE"
