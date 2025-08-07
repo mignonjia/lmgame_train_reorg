@@ -1,10 +1,10 @@
 import numpy as np
 import random
 from typing import Tuple, Dict, Any, List
-import gym
+import gymnasium as gym
 import copy
-from agents.agent_utils import all_seed
-from agents.base_env import BaseEnv
+from LMGameRL.agents.agent_utils import all_seed
+from LMGameRL.agents.base_env import BaseEnv
 
 def is_occupied(shape, anchor, board):
     for i, j in shape:

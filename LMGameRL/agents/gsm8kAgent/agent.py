@@ -3,10 +3,10 @@ import random
 import yaml
 from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass
-from agents.agent_utils import SingleTurnTrajectory, MultiTurnTrajectory, EnvOutput, debug_printout_in_env_output
-from agents.base_agent import BaseAgent
-from agents.gsm8kAgent.env import GSM8KEnv
-from agents import register_agent
+from LMGameRL.agents.agent_utils import SingleTurnTrajectory, MultiTurnTrajectory, EnvOutput, debug_printout_in_env_output
+from LMGameRL.agents.base_agent import BaseAgent
+from LMGameRL.agents.gsm8kAgent.env import GSM8KEnv
+from LMGameRL.agents import register_agent
 
 # ─────────────────── GSM8K AGENT ───────────────────
 @register_agent("gsm8kAgent")

@@ -42,7 +42,7 @@ def setup_logging() -> "Tee":
 
 # ─────────────────────────── config loader ────────────────────────────────────
 def load_config():
-    cfg_dir = project_root / "configs"
+    cfg_dir = project_root / "LMGameRL" / "configs"
     with open(cfg_dir / "base.yaml")   as f: base_cfg   = yaml.safe_load(f)
     with open(cfg_dir / "agents.yaml") as f: agent_cfgs = yaml.safe_load(f)
     cfg = {**base_cfg, **agent_cfgs}
@@ -67,7 +67,7 @@ def get_mock_llm_responses():
 def test_agent_creation():
     print("🔍 Testing GSM8KAgent creation …")
     cfg = load_config()
-    ag = GSM8KAgent(cfg["gsm8kAgent"],
+    ag = GSM8KAgent(cfg["gsm8kAgent_single_turn"],
                     group_id=0, agent_id=0, seed=42, tag="TestGSM8K")
     assert ag.max_turns >= 1
     assert hasattr(ag, "env") and hasattr(ag.env, "reset")
@@ -77,7 +77,7 @@ def test_agent_creation():
 def test_agent_reset():
     print("\n🔍 Testing reset …")
     cfg = load_config()
-    ag = GSM8KAgent(cfg["gsm8kAgent"], agent_id=0, group_id=0, seed=42)
+    ag = GSM8KAgent(cfg["gsm8kAgent_single_turn"], agent_id=0, group_id=0, seed=42)
     env_out = ag.reset(seed=123)
 
     # new API ⇒ ‘done’ = truncated or terminated
@@ -90,7 +90,7 @@ def test_agent_reset():
 def test_answer_processing():
     print("\n🔍 Testing answer parsing / env.step …")
     cfg = load_config()
-    ag = GSM8KAgent(cfg["gsm8kAgent"], agent_id=0, group_id=0)
+    ag = GSM8KAgent(cfg["gsm8kAgent_single_turn"], agent_id=0, group_id=0)
     ag.reset(seed=1)
     cases = [
         "<answer>42</answer>",
@@ -107,7 +107,7 @@ def test_answer_processing():
 def test_single_rollout():
     print("\n🔍 Testing one complete rollout …")
     cfg = load_config()
-    ag = GSM8KAgent(cfg["gsm8kAgent"], agent_id=0, group_id=0, seed=0)
+    ag = GSM8KAgent(cfg["gsm8kAgent_single_turn"], agent_id=0, group_id=0, seed=0)
     env_out = ag.reset()
     mock = get_mock_llm_responses()
 
@@ -151,7 +151,7 @@ def test_final_states_and_messages():
     """
     print("\n🔍 Testing final rollout states & message history …")
     cfg = load_config()
-    ag  = GSM8KAgent(cfg["gsm8kAgent"], agent_id=0, group_id=0, seed=101)
+    ag  = GSM8KAgent(cfg["gsm8kAgent_single_turn"], agent_id=0, group_id=0, seed=101)
 
     # turn-0 reset
     env_out = ag.reset()

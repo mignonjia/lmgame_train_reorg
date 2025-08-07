@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, Union
 
 from datasets import load_dataset
-from agents.agent_utils import all_seed
-from agents.base_env import BaseEnv
+from LMGameRL.agents.agent_utils import all_seed
+from LMGameRL.agents.base_env import BaseEnv
 from pathlib import Path
 
 

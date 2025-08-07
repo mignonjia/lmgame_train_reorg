@@ -4,7 +4,7 @@ import torch
 from verl import DataProto
 from verl.utils.dataset.rl_dataset import collate_fn
 import verl.utils.torch_functional as verl_F
-from agents import get_agent_cls, REGISTERED_AGENTS
+from LMGameRL.agents import get_agent_cls, REGISTERED_AGENTS
 import numpy as np
 from tensordict import TensorDict
 

@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import numpy as np
 import copy
 import json
@@ -8,7 +8,7 @@ import re
 import os
 from collections import defaultdict
 from pathlib import Path   
-from agents.base_env import BaseEnv
+from LMGameRL.agents.base_env import BaseEnv
 
 class BlocksworldEnv(BaseEnv):
     metadata = {'render.modes': ['human', 'ansi']}

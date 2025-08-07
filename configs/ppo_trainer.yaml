@@ -1,0 +1,126 @@
+# PPO Trainer Configuration
+# This file contains the basic PPO trainer configuration that will be merged with other configs
+
+actor_rollout_ref:
+  model:
+    path: null  # Will be overridden by model_path in main config
+    # lora config
+    lora_rank: 0
+    lora_alpha: 16
+    lora_dropout: 0.05
+    lora_target_modules: null
+    lora_task_type: CAUSAL_LM
+    init_lora_weights: true
+    trust_remote_code: False
+
+  actor:
+    strategy: fsdp
+    use_ref: true
+    optim:
+      lr: 1e-6
+      weight_decay: 1e-6
+      eps: 1e-5
+      betas: [0.9, 0.999]
+    scheduler:
+      type: cosine
+      T_max: null  # will be set by total_training_steps
+      eta_min: 1e-7
+    ppo_mini_batch_size: 32  # Will be overridden
+    micro_batch_size_per_gpu: 4  # Will be overridden
+    ppo_micro_batch_size_per_gpu: 4  # Will be overridden
+
+    # PPO configs
+    eps_clip: 0.2
+    value_clip: 0.2
+    max_grad_norm: 1.0
+    entropy_coeff: 0.001
+    value_coeff: 1.0
+    use_kl_loss: false
+    kl_loss_coef: 0.001
+    kl_loss_type: kl
+    clip_ratio_low: 0.2
+    clip_ratio_high: 0.28
+
+  ref:
+    strategy: fsdp
+    log_prob_micro_batch_size_per_gpu: 4  # Will be overridden
+
+  rollout:
+    name: vllm
+    tensor_model_parallel_size: 1
+    dtype: bfloat16
+    max_model_len: 20000
+    prompt_length: 1
+    response_length: 400
+    gpu_memory_utilization: 0.5  # Will be overridden
+    enable_chunked_prefill: false
+    max_num_batched_tokens: 20000
+    temperature: 1.0
+    top_p: 1.0
+    top_k: -1
+    n: 1
+    max_tokens: 400
+    stop_token_ids: []
+    include_stop_str_in_output: false
+    rollout_filter_ratio: 0.25
+    rollout_filter_type: std
+    mode: sync
+    enforce_eager: true
+    free_cache_engine: true
+    log_prob_micro_batch_size_per_gpu: 4  # Will be overridden
+    val_kwargs:
+      do_sample: false
+      temperature: 0
+
+critic:
+  strategy: fsdp
+  model:
+    path: null  # Will be overridden by model_path in main config
+  optim:
+    lr: 1e-5
+    weight_decay: 1e-6
+    eps: 1e-5
+    betas: [0.9, 0.999]
+  scheduler:
+    type: cosine
+    T_max: null  # will be set by total_training_steps
+    eta_min: 1e-7
+  ppo_mini_batch_size: 32  # Will be overridden
+  ppo_micro_batch_size_per_gpu: 4  # Will be overridden
+
+data:
+  max_prompt_length: 4096  # Will be overridden
+  max_response_length: 400  # Will be overridden
+  train_batch_size: 128  # Will be overridden
+  trust_remote_code: false
+
+algorithm:
+  gamma: 1.0
+  lam: 1.0
+  adv_estimator: gae
+  kl_penalty: kl
+  use_kl_in_reward: true
+  kl_ctrl:
+    type: fixed
+    kl_coef: 0.001
+
+reward_model:
+  enable: false
+
+trainer:
+  project_name: lmgame_train  # Will be overridden
+  experiment_name: default_experiment  # Will be overridden
+  total_training_steps: 200  # Will be overridden
+  validation_steps: 1
+  val_before_train: true
+  n_gpus_per_node: 1  # Will be overridden
+  nnodes: 1
+  test_freq: 10  # Will be overridden
+  logger: [console, wandb]
+  val_only: false
+  save_freq: -1  # Will be overridden
+  resume_mode: disable  # Will be overridden
+  device: cuda
+
+ray_init:
+  num_cpus: 16

@@ -44,7 +44,7 @@ def setup_logging() -> "Tee":
 
 # --- config loader --------------------------------------------------------
 def load_config():
-    cfg_dir = project_root / "configs"          # <repo>/configs
+    cfg_dir = project_root / "LMGameRL" / "configs"          # <repo>/LMGameRL/configs
     with open(cfg_dir / "base.yaml")   as f: base_cfg   = yaml.safe_load(f)
     with open(cfg_dir / "agents.yaml") as f: agent_cfgs = yaml.safe_load(f)
     cfg = {**base_cfg, **agent_cfgs}
@@ -70,7 +70,7 @@ def get_mock_llm_responses():
 def test_agent_creation():
     print("🔍 Testing BlocksworldAgent creation …")
     cfg = load_config()
-    ag  = BlocksworldAgent(cfg["blocksworldAgent"],
+    ag  = BlocksworldAgent(cfg["blocksworldAgent_text"],
                            group_id=0, agent_id=0, seed=42, tag="TestBW")
     assert ag.max_turns >= 1
     assert hasattr(ag, "env") and hasattr(ag.env, "reset")
@@ -80,7 +80,7 @@ def test_agent_creation():
 def test_agent_reset():
     print("\n🔍 Testing reset …")
     cfg = load_config()
-    ag  = BlocksworldAgent(cfg["blocksworldAgent"], seed=123)
+    ag  = BlocksworldAgent(cfg["blocksworldAgent_text"], seed=123)
     env_out = ag.reset()
 
     done_flag = env_out.truncated or env_out.terminated
@@ -91,7 +91,7 @@ def test_agent_reset():
 def test_action_parsing_and_step():
     print("\n🔍 Testing action parsing & env.step …")
     cfg = load_config()
-    ag = BlocksworldAgent(cfg["blocksworldAgent"], seed=1)
+    ag = BlocksworldAgent(cfg["blocksworldAgent_text"], seed=1)
     ag.reset()
     cases = [
         "<answer>(move 1 to 0)</answer>",
@@ -108,7 +108,7 @@ def test_action_parsing_and_step():
 def test_single_rollout():
     print("\n🔍 Testing one complete rollout …")
     cfg = load_config()
-    ag  = BlocksworldAgent(cfg["blocksworldAgent"], seed=0)
+    ag  = BlocksworldAgent(cfg["blocksworldAgent_text"], seed=0)
     env_out = ag.reset()
     mock = get_mock_llm_responses()
 
@@ -147,7 +147,7 @@ def test_parse_response_unit():
 def test_final_states_and_messages():
     print("\n🔍 Testing final rollout states & message history …")
     cfg = load_config()
-    ag  = BlocksworldAgent(cfg["blocksworldAgent"], seed=101)
+    ag  = BlocksworldAgent(cfg["blocksworldAgent_text"], seed=101)
 
     env_out = ag.reset()
     mock    = get_mock_llm_responses()

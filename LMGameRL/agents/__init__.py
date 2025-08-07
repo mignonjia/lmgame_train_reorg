@@ -48,9 +48,9 @@ def list_registered_agents() -> list:
     return list(REGISTERED_AGENTS.keys())
 
 # Import agents to trigger registration
-from agents.sokobanAgent.agent import SokobanAgent 
-from agents.gsm8kAgent.agent import GSM8KAgent
-from agents.blocksworldAgent.agent import BlocksworldAgent
-from agents.tetrisAgent.agent import TetrisAgent
-from agents.webshopAgent.agent import WebShopAgent
-from agents.birdAgent.agent import BirdAgent
+from LMGameRL.agents.sokobanAgent.agent import SokobanAgent 
+from LMGameRL.agents.gsm8kAgent.agent import GSM8KAgent
+from LMGameRL.agents.blocksworldAgent.agent import BlocksworldAgent
+from LMGameRL.agents.tetrisAgent.agent import TetrisAgent
+from LMGameRL.agents.webshopAgent.agent import WebShopAgent
+from LMGameRL.agents.birdAgent.agent import BirdAgent

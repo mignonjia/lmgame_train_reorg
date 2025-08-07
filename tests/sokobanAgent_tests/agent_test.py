@@ -15,7 +15,6 @@ project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
 from LMGameRL.agents.sokobanAgent.agent import SokobanAgent
-from LMGameRL.agents.agent_utils import parse_model_response
 
 
 # Setup logging to file
@@ -105,7 +104,7 @@ def test_sokoban_agent_creation():
     
     # Create agent - Fix: pass config['sokobanAgent'] instead of full config
     agent = SokobanAgent(
-        config=config['sokobanAgent'],
+        config=config['simpleSokobanAgent'],
         group_id=0,
         agent_id=0,
         seed=42,
@@ -139,7 +138,7 @@ def test_sokoban_agent_reset():
     
     config = load_config()
     # Fix: pass config['sokobanAgent'] instead of full config
-    agent = SokobanAgent(config=config['sokobanAgent'], agent_id=0, group_id=0, seed=42, tag="TestSokoban")
+    agent = SokobanAgent(config=config['simpleSokobanAgent'], agent_id=0, group_id=0, seed=42, tag="TestSokoban")
     
     # Test reset
     initial_env_outputs = agent.reset(seed=42)
@@ -172,7 +171,7 @@ def test_sokoban_agent_action_extraction():
     
     config = load_config()
     # Fix: pass config['sokobanAgent'] instead of full config
-    agent = SokobanAgent(config=config['sokobanAgent'], agent_id=0, group_id=0, seed=42, tag="TestSokoban")
+    agent = SokobanAgent(config=config['simpleSokobanAgent'], agent_id=0, group_id=0, seed=42, tag="TestSokoban")
     
     # Test various LLM response formats
     test_cases = [
@@ -230,7 +229,7 @@ def test_sokoban_agent_rollout():
     
     # Create agent - Fix: pass config['sokobanAgent'] instead of full config
     agent = SokobanAgent(
-        config=config['sokobanAgent'],
+        config=config['simpleSokobanAgent'],
         group_id=0,
         agent_id=0,
         seed=42,
@@ -306,7 +305,7 @@ def test_sokoban_agent_final_rollout_states():
     
     config = load_config()
     # Fix: pass config['sokobanAgent'] instead of full config
-    agent = SokobanAgent(config=config['sokobanAgent'], agent_id=0, group_id=0, seed=42, tag="TestSokoban")
+    agent = SokobanAgent(config=config['simpleSokobanAgent'], agent_id=0, group_id=0, seed=42, tag="TestSokoban")
     
     # Run a short rollout
     env_outputs = agent.reset(seed=42)
@@ -354,7 +353,7 @@ def test_sokoban_agent_complete_rollout():
     
     config = load_config()
     # Fix: pass config['sokobanAgent'] instead of full config
-    agent = SokobanAgent(config=config['sokobanAgent'], agent_id=0, group_id=0, seed=42, tag="TestSokoban")
+    agent = SokobanAgent(config=config['simpleSokobanAgent'], agent_id=0, group_id=0, seed=42, tag="TestSokoban")
     
     mock_responses = get_mock_llm_responses()
     
@@ -434,9 +433,14 @@ def test_parse_response_fix():
     """Test the updated parse_model_response function"""
     print("\n🔍 TESTING PARSE_RESPONSE FIX...")
     
+    # Create a temporary agent to access the parse method
+    cfg = load_config()
+    sokoban_cfg = cfg["simpleSokobanAgent"]
+    temp_agent = SokobanAgent(sokoban_cfg)
+    
     # Test 1: Valid response with actions
     response1 = "<think>I need to move up</think><answer>up || down</answer>"
-    processed, actions = parse_model_response(response1, enable_think=True)
+    processed, actions = temp_agent.parse_llm_response(response1, enable_think=True)
     print(f"   Response 1: {response1}")
     print(f"   Parsed actions: {actions}")
     print(f"   Actions type: {type(actions)}")
@@ -445,18 +449,19 @@ def test_parse_response_fix():
     
     # Test 2: No think tags
     response2 = "<answer>left || right || up</answer>"
-    processed, actions = parse_model_response(response2, enable_think=False)
+    processed, actions = temp_agent.parse_llm_response(response2, enable_think=False)
     print(f"   Response 2: {response2}")
     print(f"   Parsed actions: {actions}")
     assert actions == ['left', 'right', 'up'], f"Expected ['left', 'right', 'up'], got {actions}"
     
     # Test 3: Invalid format
     response3 = "Just some random text"
-    processed, actions = parse_model_response(response3, enable_think=True)
+    processed, actions = temp_agent.parse_llm_response(response3, enable_think=True)
     print(f"   Response 3: {response3}")
     print(f"   Parsed actions: {actions}")
     assert actions == [], f"Expected empty list, got {actions}"
     
+    temp_agent.close()
     print("   ✅ Parse response tests passed!")
 
 def test_agent_seeding():
@@ -472,7 +477,7 @@ def test_agent_seeding():
     
     for i in range(5):
         agent = SokobanAgent(
-            config=config['sokobanAgent'],
+            config=config['simpleSokobanAgent'],
             agent_id=i,
             group_id=i // 2,  # Groups: 0,0,1,1,2
             seed=None  # Let it generate random seeds
@@ -511,7 +516,7 @@ def test_agent_action_processing():
     config = load_config()
     
     agent = SokobanAgent(
-        config=config['sokobanAgent'],
+        config=config['simpleSokobanAgent'],
         agent_id=0,
         group_id=0
     )
@@ -556,7 +561,7 @@ def test_conversation_quality():
     config = load_config()
     
     agent = SokobanAgent(
-        config=config['sokobanAgent'],
+        config=config['simpleSokobanAgent'],
         agent_id=0,
         group_id=0
     )

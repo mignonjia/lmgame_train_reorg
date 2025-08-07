@@ -3,10 +3,10 @@ import random
 import yaml
 from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass
-from agents.agent_utils import SingleTurnTrajectory, MultiTurnTrajectory, EnvOutput, debug_printout_in_env_output
-from agents.base_agent import BaseAgent
-from agents.tetrisAgent.env import TetrisEnv
-from agents import register_agent
+from LMGameRL.agents.agent_utils import SingleTurnTrajectory, MultiTurnTrajectory, EnvOutput, debug_printout_in_env_output
+from LMGameRL.agents.base_agent import BaseAgent
+from LMGameRL.agents.tetrisAgent.env import TetrisEnv
+from LMGameRL.agents import register_agent
 
 # ─────────────────── TETRIS AGENT ───────────────────
 @register_agent("tetrisAgent")

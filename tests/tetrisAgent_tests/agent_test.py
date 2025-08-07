@@ -41,7 +41,7 @@ def setup_logging():
 
 # ╭──────────────────────── CONFIG LOADER ─────────────────────────────╮
 def load_config():
-    cfg_dir = project_root / "configs"
+    cfg_dir = project_root / "LMGameRL" / "configs"
     with open(cfg_dir / "base.yaml") as f:
         base_cfg = yaml.safe_load(f)
     with open(cfg_dir / "agents.yaml") as f:
@@ -65,7 +65,7 @@ def mock_llm_responses():
 def test_agent_creation():
     print("🔍 Test 1: TetrisAgent creation")
     cfg = load_config()
-    agent = TetrisAgent(cfg["tetrisAgent"], group_id=0, agent_id=0, seed=42, tag="TestTetris")
+    agent = TetrisAgent(cfg["tetrisAgent_type_1_dim_4"], group_id=0, agent_id=0, seed=42, tag="TestTetris")
     assert agent.max_turns > 0 and agent.max_actions_all_turns > 0
     assert hasattr(agent, "env") and agent.env.board.shape == (agent.env.width, agent.env.height)
     print("   ✅ creation OK")
@@ -74,7 +74,7 @@ def test_agent_creation():
 def test_agent_reset():
     print("🔍 Test 2: reset() returns valid EnvOutput")
     cfg = load_config()
-    agent = TetrisAgent(cfg["tetrisAgent"], agent_id=0, group_id=0, seed=123)
+    agent = TetrisAgent(cfg["tetrisAgent_type_1_dim_4"], agent_id=0, group_id=0, seed=123)
     env_out = agent.reset(seed=123)
     assert env_out.truncated is False and env_out.reward == 0.0 and isinstance(env_out.state, str)
     print("   ✅ reset OK – state len:", len(env_out.state))
@@ -83,7 +83,7 @@ def test_agent_reset():
 def test_action_parsing():
     print("🔍 Test 3: action extraction logic")
     cfg = load_config()
-    agent = TetrisAgent(cfg["tetrisAgent"], seed=0)
+    agent = TetrisAgent(cfg["tetrisAgent_type_1_dim_4"], seed=0)
     test_cases = [
         ("<answer>Left || Right</answer>", ["Left", "Right"]),
         ("<answer>Down</answer>", ["Down"]),
@@ -100,7 +100,7 @@ def test_action_parsing():
 def test_rollout():
     print("🔍 Test 4: full rollout with mocked LLM")
     cfg = load_config()
-    agent = TetrisAgent(cfg["tetrisAgent"], seed=0, tag="RolloutTetris")
+    agent = TetrisAgent(cfg["tetrisAgent_type_1_dim_4"], seed=0, tag="RolloutTetris")
     mocks = mock_llm_responses()
     env_out = agent.reset()
     idx = 0
@@ -113,7 +113,7 @@ def test_rollout():
 def test_final_states():
     print("🔍 Test 5: final rollout states structure")
     cfg = load_config()
-    agent = TetrisAgent(cfg["tetrisAgent"], seed=7)
+    agent = TetrisAgent(cfg["tetrisAgent_type_1_dim_4"], seed=7)
     agent.reset()
     agent.get_env_outputs("<answer>Down</answer>")
     final = agent.get_final_rollout_states()
