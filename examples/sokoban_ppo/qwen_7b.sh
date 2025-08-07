@@ -1,25 +1,27 @@
 #!/bin/bash
 
-# Quick Training with Qwen 0.5B - Configurable Parameters
-# Uses base.yaml with parameter overrides
+# Sokoban PPO Training with Qwen 7B
+# Configurable script with key training parameters
 
 # ------ Configurable Parameters ------
-CUDA_VISIBLE_DEVICES=${1:-"0"}
+CUDA_VISIBLE_DEVICES=${1:-"0,1,2,3"}
 AGENT_GROUP_NUM=${2:-"8"}
 AGENT_GROUP_SIZE=${3:-"16"}
-VALIDATION_AGENT_GROUP_NUM=${4:-"64,64"}
-VALIDATION_AGENT_GROUP_SIZE=${5:-"1,1"}
+VALIDATION_AGENT_GROUP_NUM=${4:-"256,256,256,256,256,256,256,256,256,256,256,256"}
+VALIDATION_AGENT_GROUP_SIZE=${5:-"1,1,1,1,1,1,1,1,1,1,1,1"}
 TRAINING_TASKS=${6:-"simpleSokobanAgent"}
-VALIDATION_TASKS=${7:-"simpleSokobanAgent,largeSokobanAgent"}
-N_GPUS_PER_NODE=${8:-1}
+VALIDATION_TASKS=${7:-"simpleSokobanAgent,largeSokobanAgent,gsm8kAgent_single_turn,gsm8kAgent_5_turn,blocksworldAgent_text,blocksworldAgent_1d,blocksworldAgent_2d_sparse,tetrisAgent_type_1_dim_4,tetrisAgent_type_2_dim_3,tetrisAgent_type_2_dim_4,webshopAgent,birdAgent"}
+N_GPUS_PER_NODE=${8:-4}
 PROJECT_NAME=${9:-"lmgame_train"}
-EXPERIMENT_NAME=${10:-"quick_train_qwen_halfb_$(date +"%Y%m%d_%H%M%S")"}
-MODEL_PATH=${11:-"Qwen/Qwen2.5-0.5B-Instruct"}
+EXPERIMENT_NAME=${10:-"sokoban_qwen_7b_$(date +"%Y%m%d_%H%M%S")"}
+MODEL_PATH=${11:-"Qwen/Qwen2.5-7B-Instruct"}
 
-echo "=== Quick Training with Qwen 0.5B ==="
+echo "=== Sokoban PPO Training with Qwen 7B ==="
 echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 echo "Agent Group Num: [$AGENT_GROUP_NUM]"
 echo "Agent Group Size: [$AGENT_GROUP_SIZE]"
+echo "Validation Agent Group Num: [$VALIDATION_AGENT_GROUP_NUM]"
+echo "Validation Agent Group Size: [$VALIDATION_AGENT_GROUP_SIZE]"
 echo "Training tasks: $TRAINING_TASKS"
 echo "Validation tasks: $VALIDATION_TASKS"
 echo "N_GPUs per node: $N_GPUS_PER_NODE"
@@ -27,16 +29,16 @@ echo "Project name: $PROJECT_NAME"
 echo "Experiment name: $EXPERIMENT_NAME"
 echo "Model path: $MODEL_PATH"
 
-# Setup project root (script is in project root)
-PROJECT_ROOT="$(pwd)"
-echo "Project root: $PROJECT_ROOT"
+# ------ Setup ------
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$PROJECT_ROOT"
 
 # Setup logging
 mkdir -p cache
-LOG_FILE="cache/train_qwen_half_b_$(date +"%Y%m%d_%H%M%S").log"
+LOG_FILE="cache/sokoban_qwen_7b_$(date +"%Y%m%d_%H%M%S").log"
 echo "Logging to: $LOG_FILE"
 
-# Set environment and run training
+# ------ Environment Setup ------
 export CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES"
 export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
 
@@ -51,6 +53,7 @@ VALIDATION_OVERRIDE="rollout.validation=[$(printf "\"%s\"," "${VALIDATION_ARRAY[
 VAL_GROUP_NUM_OVERRIDE="rollout.validation_agent_group_num=[$(printf "%s," "${VAL_GROUP_NUM_ARRAY[@]}" | sed 's/,$//')]"
 VAL_GROUP_SIZE_OVERRIDE="rollout.validation_agent_group_size=[$(printf "%s," "${VAL_GROUP_SIZE_ARRAY[@]}" | sed 's/,$//')]"
 
+# ------ Run Training ------
 python lmgamerl/train.py \
   --config-name "base" \
   system.CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES" \
@@ -69,8 +72,9 @@ python lmgamerl/train.py \
 echo "Training completed. Log: $LOG_FILE"
 
 # ------ Usage Examples ------
-# Default: ./quick_train_qwen_halfb.sh
-# Custom GPUs: ./quick_train_qwen_halfb.sh "0,1"
-# Custom agent groups: ./quick_train_qwen_halfb.sh "0" "16" "32"
-# Custom tasks: ./quick_train_qwen_halfb.sh "0" "8" "16" "64,64" "1,1" "simpleSokobanAgent" "simpleSokobanAgent,largeSokobanAgent"
-# Full custom: ./quick_train_qwen_halfb.sh "0" "8" "16" "64,64,64,64" "1,1,1,1" "simpleSokobanAgent" "simpleSokobanAgent,largeSokobanAgent" 1 "my_project" "my_experiment" "Qwen/Qwen2.5-0.5B-Instruct" 
+# Default: ./qwen_7b.sh
+# Custom GPUs: ./qwen_7b.sh "0,1"
+# Custom agent groups: ./qwen_7b.sh "0,1,2,3" "16" "32"
+# Custom validation groups: ./qwen_7b.sh "0,1,2,3" "8" "16" "512,512" "1,1"
+# Custom tasks: ./qwen_7b.sh "0,1,2,3" "8" "16" "256,256" "1,1" "simpleSokobanAgent" "simpleSokobanAgent,largeSokobanAgent"
+# Full custom: ./qwen_7b.sh "0,1,2,3" "8" "16" "256,256,256,256" "1,1,1,1" "simpleSokobanAgent" "simpleSokobanAgent,largeSokobanAgent" 4 "my_project" "my_experiment" "Qwen/Qwen2.5-7B-Instruct"
