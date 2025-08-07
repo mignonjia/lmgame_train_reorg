@@ -214,7 +214,7 @@ verify_stage1() {
 # Main function
 main() {
     echo "=========================================="
-    echo "LMGameRL Stage 1: Submodule Installation"
+    echo "lmgamerl Stage 1: Submodule Installation"
     echo "Started at: $(date)"
     echo "=========================================="
     

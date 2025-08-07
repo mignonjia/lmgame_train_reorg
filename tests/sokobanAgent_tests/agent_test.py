@@ -10,11 +10,11 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-# Add project root to path for LMGameRL package
+# Add project root to path for lmgamerl package
 project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
-from LMGameRL.agents.sokobanAgent.agent import SokobanAgent
+from lmgamerl.agents.sokobanAgent.agent import SokobanAgent
 
 
 # Setup logging to file

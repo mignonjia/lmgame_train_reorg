@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Bird dataset loading utilities for LMGameRL.
+Bird dataset loading utilities for lmgamerl.
 Separate from main package installation.
 """
 
@@ -16,7 +16,7 @@ def _find_repo_root(start: Path) -> Path:
     """Find repository root by looking for characteristic directories."""
     cur = start.resolve()
     while cur != cur.parent:
-        if (cur / "LMGameRL").is_dir() or (cur / "pyproject.toml").is_file():
+        if (cur / "lmgamerl").is_dir() or (cur / "pyproject.toml").is_file():
             return cur
         cur = cur.parent
     raise FileNotFoundError("Could not locate project root")
@@ -38,7 +38,7 @@ def load_bird_dataset() -> tuple[Path, Path] | None:
     try:
         repo_root = _find_repo_root(Path(__file__).parent)
     except FileNotFoundError:
-        print("❌ Could not find LMGameRL project root", file=sys.stderr)
+        print("❌ Could not find lmgamerl project root", file=sys.stderr)
         return None
     # # -----------------------------------------
     # # debug load_dataset
@@ -130,7 +130,7 @@ def load_bird_dataset() -> tuple[Path, Path] | None:
 
 def main():
     """Main entry point with CLI options."""
-    parser = argparse.ArgumentParser(description="Load Bird dataset for LMGameRL")
+    parser = argparse.ArgumentParser(description="Load Bird dataset for lmgamerl")
     parser.add_argument("--bird", action="store_true", help="Load Bird dataset")
     
     args = parser.parse_args()
@@ -142,7 +142,7 @@ def main():
         print("📋 Bird dataset loading not requested.")
         return
     
-    print("🚀 LMGameRL Bird Dataset Loader")
+    print("🚀 lmgamerl Bird Dataset Loader")
     print("=" * 30)
     
     result = load_bird_dataset()

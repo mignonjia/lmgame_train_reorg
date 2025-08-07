@@ -12,7 +12,7 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
-from LMGameRL.agents.tetrisAgent.agent import TetrisAgent      # adjust path if needed
+from lmgamerl.agents.tetrisAgent.agent import TetrisAgent      # adjust path if needed
 
 # ╭────────────────────────── LOGGING SETUP ───────────────────────────╮
 def setup_logging():
@@ -41,7 +41,7 @@ def setup_logging():
 
 # ╭──────────────────────── CONFIG LOADER ─────────────────────────────╮
 def load_config():
-    cfg_dir = project_root / "LMGameRL" / "configs"
+    cfg_dir = project_root / "configs"
     with open(cfg_dir / "base.yaml") as f:
         base_cfg = yaml.safe_load(f)
     with open(cfg_dir / "agents.yaml") as f:

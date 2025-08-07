@@ -87,7 +87,7 @@ declare -a FAILED_TEST_NAMES=()
 declare -a RUNNING_PIDS=()
 declare -a TEST_JOBS=()
 
-print_header "LMGameRL Test Suite Runner"
+print_header "lmgamerl Test Suite Runner"
 echo "Started at: $(date)"
 echo "Project root: $PROJECT_ROOT"
 echo "Tests directory: $TESTS_DIR"
@@ -427,7 +427,7 @@ generate_report() {
     
     # Generate detailed report
     {
-        echo "LMGameRL Test Suite Report"
+        echo "lmgamerl Test Suite Report"
         echo "=========================="
         echo "Generated: $(date)"
         echo "Session: $TIMESTAMP"
@@ -476,8 +476,8 @@ generate_report() {
 # Main execution
 main() {
     # Check prerequisites
-    if [ ! -d "$PROJECT_ROOT/LMGameRL" ]; then
-        print_error "LMGameRL package not found at $PROJECT_ROOT/LMGameRL"
+    if [ ! -d "$PROJECT_ROOT/lmgamerl" ]; then
+        print_error "lmgamerl package not found at $PROJECT_ROOT/lmgamerl"
         print_error "Please ensure you're running this from the correct directory"
         exit 1
     fi
@@ -495,11 +495,11 @@ main() {
     print_step "Python path: $PYTHONPATH"
     print_step "Working directory: $(pwd)"
     
-    # Try to import LMGameRL to verify setup
-    if python -c "import LMGameRL" 2>/dev/null; then
-        print_success "LMGameRL package can be imported"
+    # Try to import lmgamerl to verify setup
+    if python -c "import lmgamerl" 2>/dev/null; then
+        print_success "lmgamerl package can be imported"
     else
-        print_warning "LMGameRL package cannot be imported - some tests may fail"
+        print_warning "lmgamerl package cannot be imported - some tests may fail"
         print_warning "Consider running: pip install -e ."
     fi
     echo ""

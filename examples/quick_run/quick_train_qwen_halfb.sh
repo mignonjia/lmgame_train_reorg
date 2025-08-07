@@ -24,7 +24,7 @@ echo "Working directory: $(pwd)"
 # Set CUDA device explicitly (verl may ignore this in base.yaml so we explicitly set it here)
 export CUDA_VISIBLE_DEVICES=0
 
-# Add LMGameRL to Python path
+# Add lmgamerl to Python path
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 
 # ------ Run Training with Logging ------
@@ -32,7 +32,7 @@ export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 cp "$PROJECT_ROOT/examples/quick_run/quick_train_qwen_halfb_config.yaml" "$PROJECT_ROOT/configs/"
 
 # Run training using the copied config
-python LMGameRL/train.py \
+python lmgamerl/train.py \
   --config-name "quick_train_qwen_halfb_config" \
   2>&1 | tee "$LOG_FILE"
 

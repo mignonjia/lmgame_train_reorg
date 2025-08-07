@@ -3,16 +3,16 @@ import random
 import yaml
 from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass
-from LMGameRL.agents.agent_utils import SingleTurnTrajectory, MultiTurnTrajectory, EnvOutput, debug_printout_in_env_output
-from LMGameRL.agents.base_agent import BaseAgent
-from LMGameRL.agents.webshopAgent.env import WebShopEnv
-from LMGameRL.agents import register_agent
+from lmgamerl.agents.agent_utils import SingleTurnTrajectory, MultiTurnTrajectory, EnvOutput, debug_printout_in_env_output
+from lmgamerl.agents.base_agent import BaseAgent
+from lmgamerl.agents.blocksworldAgent.env import BlocksworldEnv
+from lmgamerl.agents import register_agent
 
-# ─────────────────── WEBSHOP AGENT ───────────────────
-@register_agent("webshopAgent")
-class WebShopAgent(BaseAgent):
+# ─────────────────── BLOCKSWORLD AGENT ───────────────────
+@register_agent("blocksworldAgent")
+class BlocksworldAgent(BaseAgent):
     """
-    WebShop agent that manages environment interactions and conversation history.
+    Blocksworld agent that manages environment interactions and conversation history.
     Compatible with SyncMultiTurnRollout interface.
     """
     
@@ -21,13 +21,13 @@ class WebShopAgent(BaseAgent):
         self.initialize_env()
 
     def initialize_env(self):
-        """Initialize the WebShop environment."""
-        self.env = WebShopEnv(self.env_config)
+        """Initialize the Blocksworld environment."""
+        self.env = BlocksworldEnv(self.env_config)
 
     # ─────────────────── ENV INTERACTION ───────────────────
     def get_env_outputs(self, llm_response: str):
         """
-        Parse the model’s reply, send the (single) numeric answer to WebShopEnv,
+        Parse the model’s reply, send the (single) numeric answer to BlocksworldEnv,
         and package the resulting EnvOutput + trajectory bookkeeping.
         """
         llm_raw_response = llm_response

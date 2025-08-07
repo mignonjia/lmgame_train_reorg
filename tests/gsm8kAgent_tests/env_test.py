@@ -6,7 +6,7 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
-from LMGameRL.agents.gsm8kAgent.env import GSM8KEnv
+from lmgamerl.agents.gsm8kAgent.env import GSM8KEnv
 
 # ── logging helper (unchanged) ───────────────────────────────────────────────
 def setup_logging():

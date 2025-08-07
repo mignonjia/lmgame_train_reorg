@@ -15,7 +15,7 @@ project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
 # ── agent under test ────────────────────────────────────────────────────
-from LMGameRL.agents.blocksworldAgent.agent import BlocksworldAgent
+from lmgamerl.agents.blocksworldAgent.agent import BlocksworldAgent
 
 # ────────────────────────── logging helper ──────────────────────────────
 def setup_logging() -> "Tee":
@@ -44,7 +44,7 @@ def setup_logging() -> "Tee":
 
 # --- config loader --------------------------------------------------------
 def load_config():
-    cfg_dir = project_root / "LMGameRL" / "configs"          # <repo>/LMGameRL/configs
+    cfg_dir = project_root / "configs"          # <repo>/configs
     with open(cfg_dir / "base.yaml")   as f: base_cfg   = yaml.safe_load(f)
     with open(cfg_dir / "agents.yaml") as f: agent_cfgs = yaml.safe_load(f)
     cfg = {**base_cfg, **agent_cfgs}
